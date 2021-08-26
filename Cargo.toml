@@ -1,0 +1,12 @@
+[package]
+name = "cyclic_list"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+[features]
+length = []
+default = ["length"]
