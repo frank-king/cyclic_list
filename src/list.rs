@@ -1,5 +1,5 @@
 use crate::cursor::{Cursor, CursorMut};
-use crate::iterator::{Iter, IterMut};
+use crate::iterator::{IntoIter, Iter, IterMut};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
@@ -46,6 +46,54 @@ impl<T> List<T> {
         // SAFETY: `ghost.prev` is always valid (either `ghost` itself, or the last element
         // in the cyclic_list).
         NonNull::from(unsafe { self.ghost().as_ref().prev.as_ref() }).cast()
+    }
+    pub(crate) unsafe fn splice_nodes(
+        &mut self,
+        mut existing_prev: NonNull<Node<T>>,
+        mut existing_next: NonNull<Node<T>>,
+        mut splice_start: NonNull<Node<T>>,
+        mut splice_end: NonNull<Node<T>>,
+        #[cfg(feature = "length")] splice_len: usize,
+    ) {
+        existing_prev.as_mut().next = splice_start;
+        existing_next.as_mut().prev = splice_end;
+        splice_start.as_mut().prev = existing_prev;
+        splice_end.as_mut().next = existing_next;
+        #[cfg(feature = "length")]
+        {
+            self.len += splice_len;
+        }
+    }
+    pub(crate) unsafe fn from_splice(
+        start: NonNull<Node<T>>,
+        end: NonNull<Node<T>>,
+        #[cfg(feature = "length")] len: usize,
+    ) -> Self {
+        let mut list = List::new();
+        // TODO: SAFETY
+        list.splice_nodes(
+            list.ghost(),
+            list.ghost(),
+            start,
+            end,
+            #[cfg(feature = "length")]
+            len,
+        );
+        list
+    }
+}
+
+// Ensure that `List` and its read-only iterators are covariant in their type parameters.
+#[allow(dead_code)]
+fn assert_covariance() {
+    fn a<'a>(x: List<&'static str>) -> List<&'a str> {
+        x
+    }
+    fn b<'i, 'a>(x: Iter<'i, &'static str>) -> Iter<'i, &'a str> {
+        x
+    }
+    fn c<'a>(x: IntoIter<&'static str>) -> IntoIter<&'a str> {
+        x
     }
 }
 
@@ -134,11 +182,19 @@ impl<T> List<T> {
     }
 
     pub fn iter(&self) -> Iter<'_, T> {
-        Iter::new(self.cursor_front())
+        Iter::new(self)
     }
 
     pub fn iter_mut(&mut self) -> IterMut<'_, T> {
-        IterMut::new(self.cursor_front_mut())
+        IterMut::new(self)
+    }
+
+    pub fn split_off(&mut self, at: usize) -> Option<List<T>> {
+        let mut cursor_mut = self.cursor_front_mut();
+        cursor_mut
+            .seek_forward(at)
+            .expect("Cannot split at a nonexistent node");
+        cursor_mut.split_after()
     }
 }
 
@@ -149,12 +205,12 @@ impl<T: Debug> Debug for List<T> {
 }
 
 impl<T> Node<T> {
-    pub(crate) fn new(next: NonNull<Node<T>>, prev: NonNull<Node<T>>, element: T) -> Box<Self> {
-        Box::new(Node {
+    pub(crate) fn new(next: NonNull<Node<T>>, prev: NonNull<Node<T>>, element: T) -> NonNull<Self> {
+        NonNull::from(Box::leak(Box::new(Node {
             next,
             prev,
             element,
-        })
+        })))
     }
 
     pub(crate) fn into_element(self: Box<Self>) -> T {
@@ -201,9 +257,7 @@ mod tests {
             }
         }
         let dropped = RefCell::new(Vec::<i32>::new());
-        println!("start ");
         let mut list = List::<DropChecker<i32>>::new();
-        eprintln!("cyclic_list: {:?}", list);
         list.push_back(DropChecker::new(1, &dropped));
         list.push_back(DropChecker::new(2, &dropped));
         list.push_back(DropChecker::new(3, &dropped));

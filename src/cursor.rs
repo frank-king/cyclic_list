@@ -1,19 +1,16 @@
 use crate::list::{List, Node};
-use std::ops::Range;
 use std::ptr::NonNull;
 
 pub struct Cursor<'a, T: 'a> {
-    #[cfg(feature = "length")]
     index: usize,
     current: NonNull<Node<T>>,
-    list: &'a List<T>,
+    pub(crate) list: &'a List<T>,
 }
 
 pub struct CursorMut<'a, T: 'a> {
-    #[cfg(feature = "length")]
     index: usize,
     current: NonNull<Node<T>>,
-    list: &'a mut List<T>,
+    pub(crate) list: &'a mut List<T>,
 }
 
 macro_rules! impl_cursor {
@@ -33,12 +30,6 @@ macro_rules! impl_cursor {
         }
 
         impl<'a, T: 'a> $CURSOR<'a, T> {
-            #[cfg(feature = "length")]
-            pub fn len(&self) -> usize {
-                self.list.len()
-            }
-
-            #[cfg(feature = "length")]
             pub fn index(&self) -> usize {
                 self.index
             }
@@ -59,6 +50,24 @@ macro_rules! impl_cursor {
                     return true;
                 }
                 false
+            }
+
+            pub fn seek_forward(&mut self, step: usize) -> Result<(), usize> {
+                for i in 0..step {
+                    if !self.move_next() {
+                        return Err(i);
+                    }
+                }
+                Ok(())
+            }
+
+            pub fn seek_backward(&mut self, step: usize) -> Result<(), usize> {
+                for i in 0..step {
+                    if !self.move_prev() {
+                        return Err(i);
+                    }
+                }
+                Ok(())
             }
 
             pub fn current(&self) -> Option<&'a T> {
@@ -92,13 +101,8 @@ impl_cursor!(CursorMut);
 impl_cursor!(Cursor);
 
 impl<'a, T: 'a> Cursor<'a, T> {
-    pub(crate) fn new(
-        #[cfg(feature = "length")] index: usize,
-        list: &'a List<T>,
-        current: NonNull<Node<T>>,
-    ) -> Self {
+    pub(crate) fn new(index: usize, list: &'a List<T>, current: NonNull<Node<T>>) -> Self {
         Self {
-            #[cfg(feature = "length")]
             index,
             current,
             list,
@@ -107,13 +111,8 @@ impl<'a, T: 'a> Cursor<'a, T> {
 }
 
 impl<'a, T: 'a> CursorMut<'a, T> {
-    pub(crate) fn new(
-        #[cfg(feature = "length")] index: usize,
-        list: &'a mut List<T>,
-        current: NonNull<Node<T>>,
-    ) -> Self {
+    pub(crate) fn new(index: usize, list: &'a mut List<T>, current: NonNull<Node<T>>) -> Self {
         Self {
-            #[cfg(feature = "length")]
             index,
             current,
             list,
@@ -129,18 +128,16 @@ impl<'a, T: 'a> CursorMut<'a, T> {
     }
     fn insert(&mut self, mut prev: NonNull<Node<T>>, mut next: NonNull<Node<T>>, item: T) {
         let node = Node::new(next, prev, item);
-        let node = NonNull::from(Box::leak(node));
         // TODO: SAFETY
         unsafe {
-            next.as_mut().prev = node;
-            prev.as_mut().next = node;
-        }
-        if self.is_ghost(self.current) {
-            self.current = self.next();
-        }
-        #[cfg(feature = "length")]
-        {
-            self.list.len += 1;
+            self.list.splice_nodes(
+                prev,
+                next,
+                node,
+                node,
+                #[cfg(feature = "length")]
+                1,
+            );
         }
     }
 }
@@ -163,6 +160,7 @@ impl<'a, T: 'a> CursorMut<'a, T> {
 
     pub fn insert_after(&mut self, item: T) {
         self.insert(self.current, self.next(), item);
+        self.move_next();
     }
 
     pub fn insert_before(&mut self, item: T) {
@@ -185,115 +183,46 @@ impl<'a, T: 'a> CursorMut<'a, T> {
         // TODO: index
         Some(Node::into_element(node))
     }
-}
 
-pub struct CursorRange<'a, T: 'a> {
-    #[cfg(feature = "length")]
-    range: Range<usize>,
-    begin: NonNull<Node<T>>,
-    end: NonNull<Node<T>>,
-    list: &'a List<T>,
-}
-
-impl<'a, T: 'a> CursorRange<'a, T> {
-    fn new(
-        #[cfg(feature = "length")] range: Range<usize>,
-        begin: NonNull<Node<T>>,
-        end: NonNull<Node<T>>,
-        list: &'a List<T>,
-    ) -> Self {
-        Self {
-            #[cfg(feature = "length")]
-            range,
-            begin,
-            end,
-            list,
-        }
-    }
-}
-
-pub struct CursorRangeMut<'a, T: 'a> {
-    #[cfg(feature = "length")]
-    range: Range<usize>,
-    begin: NonNull<Node<T>>,
-    end: NonNull<Node<T>>,
-    list: &'a mut List<T>,
-}
-
-impl<'a, T: 'a> CursorRangeMut<'a, T> {
-    fn new(
-        #[cfg(feature = "length")] range: Range<usize>,
-        begin: NonNull<Node<T>>,
-        end: NonNull<Node<T>>,
-        list: &'a mut List<T>,
-    ) -> Self {
-        Self {
-            #[cfg(feature = "length")]
-            range,
-            begin,
-            end,
-            list,
-        }
-    }
-}
-
-macro_rules! impl_cursor_range {
-    ($CURSOR_RANGE:ident, $CURSOR:ident) => {
-        impl<'a, T: 'a> $CURSOR_RANGE<'a, T> {
-            pub fn begin<'b>(&'b mut self) -> $CURSOR<'b, T>
-            where
-                'a: 'b,
-            {
-                $CURSOR::new(
-                    #[cfg(feature = "length")]
-                    self.range.start,
-                    self.list,
-                    self.begin,
-                )
-            }
-
-            pub fn end<'b>(&'b mut self) -> $CURSOR<'b, T>
-            where
-                'a: 'b,
-            {
-                $CURSOR::new(
-                    #[cfg(feature = "length")]
-                    self.range.end,
-                    self.list,
-                    self.end,
-                )
-            }
-
-            pub fn into_begin(self) -> $CURSOR<'a, T> {
-                $CURSOR::new(
-                    #[cfg(feature = "length")]
-                    self.range.start,
-                    self.list,
-                    self.end,
-                )
-            }
-
-            pub fn into_end(self) -> $CURSOR<'a, T> {
-                $CURSOR::new(
-                    #[cfg(feature = "length")]
-                    self.range.end,
-                    self.list,
-                    self.end,
-                )
-            }
-        }
-    };
-}
-
-impl_cursor_range!(CursorRange, Cursor);
-impl_cursor_range!(CursorRangeMut, CursorMut);
-
-impl<'a, T: 'a> CursorRangeMut<'a, T> {
-    pub fn insert_before(&mut self, item: T) {
-        self.begin().insert_before(item)
+    pub fn as_cursor(&self) -> Cursor<'_, T> {
+        Cursor::new(self.index, self.list, self.current)
     }
 
-    pub fn insert_after(&mut self, item: T) {
-        self.end().insert_before(item)
+    pub fn split_after(&mut self) -> Option<List<T>> {
+        if self.is_ghost(self.current) || self.is_ghost(self.next()) {
+            return None;
+        }
+        let split_start = self.next();
+        let split_end = self.list.ghost_prev();
+        // TODO: SAFETY
+        unsafe {
+            self.current.as_mut().next = self.list.ghost();
+            Some(List::from_splice(
+                split_start,
+                split_end,
+                #[cfg(feature = "length")]
+                {
+                    self.list.len - self.index
+                },
+            ))
+        }
+    }
+
+    pub fn split_before(&mut self) -> Option<List<T>> {
+        if self.is_ghost(self.current) || self.is_ghost(self.prev()) {
+            return None;
+        }
+        let split_start = self.prev();
+        let split_end = self.list.ghost_next();
+        // TODO: SAFETY
+        unsafe {
+            self.current.as_mut().prev = self.list.ghost();
+            Some(List::from_splice(
+                split_start,
+                split_end,
+                #[cfg(feature = "length")]
+                self.index,
+            ))
+        }
     }
 }
