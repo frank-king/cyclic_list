@@ -1,4 +1,4 @@
-use crate::cursor::{
+use crate::list::cursor::{
     Cursor, CursorBackIter, CursorBackIterMut, CursorIter, CursorIterMut, CursorMut,
 };
 use crate::list::{List, Node};
@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 use std::ptr::NonNull;
 
 pub struct Iter<'a, T: 'a> {
-    begin: NonNull<Node<T>>,
+    start: NonNull<Node<T>>,
     end: NonNull<Node<T>>,
     #[cfg(feature = "length")]
     len: usize,
@@ -16,13 +16,14 @@ pub struct Iter<'a, T: 'a> {
 
 impl<'a, T: 'a> Iter<'a, T> {
     pub(crate) fn new(list: &'a List<T>) -> Self {
-        let begin = list.ghost_node_next();
+        let start = list.front_node();
         let end = list.ghost_node();
         let _marker = PhantomData;
         #[cfg(feature = "length")]
         let len = list.len();
+        eprintln!("len: {}", len);
         Self {
-            begin,
+            start,
             end,
             #[cfg(feature = "length")]
             len,
@@ -35,12 +36,12 @@ impl<'a, T: 'a> Iterator for Iter<'a, T> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.begin == self.end {
+        if self.start == self.end {
             return None;
         }
         // TODO: SAFETY
-        let current = unsafe { self.begin.as_ref() };
-        self.begin = current.next;
+        let current = unsafe { self.start.as_ref() };
+        self.start = current.next;
         #[cfg(feature = "length")]
         {
             self.len -= 1;
@@ -63,7 +64,7 @@ impl<'a, T: 'a> Iterator for Iter<'a, T> {
 
 impl<'a, T: 'a> DoubleEndedIterator for Iter<'a, T> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        if self.begin == self.end {
+        if self.start == self.end {
             return None;
         }
         // TODO: SAFETY
@@ -84,7 +85,7 @@ impl<'a, T: 'a> ExactSizeIterator for Iter<'a, T> {}
 impl<'a, T: 'a> FusedIterator for Iter<'a, T> {}
 
 pub struct IterMut<'a, T: 'a> {
-    begin: NonNull<Node<T>>,
+    start: NonNull<Node<T>>,
     end: NonNull<Node<T>>,
     #[cfg(feature = "length")]
     len: usize,
@@ -93,13 +94,13 @@ pub struct IterMut<'a, T: 'a> {
 
 impl<'a, T: 'a> IterMut<'a, T> {
     pub(crate) fn new(list: &'a mut List<T>) -> Self {
-        let begin = list.ghost_node_next();
+        let start = list.front_node();
         let end = list.ghost_node();
         let _marker = PhantomData;
         #[cfg(feature = "length")]
         let len = list.len();
         Self {
-            begin,
+            start,
             end,
             #[cfg(feature = "length")]
             len,
@@ -112,12 +113,12 @@ impl<'a, T: 'a> Iterator for IterMut<'a, T> {
     type Item = &'a mut T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.begin == self.end {
+        if self.start == self.end {
             return None;
         }
         // TODO: SAFETY
-        let current = unsafe { self.begin.as_mut() };
-        self.begin = current.next;
+        let current = unsafe { self.start.as_mut() };
+        self.start = current.next;
         #[cfg(feature = "length")]
         {
             self.len -= 1;
@@ -145,7 +146,7 @@ impl<'a, T: 'a> FusedIterator for IterMut<'a, T> {}
 
 impl<'a, T: 'a> DoubleEndedIterator for IterMut<'a, T> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        if self.begin == self.end {
+        if self.start == self.end {
             return None;
         }
         // TODO: SAFETY
@@ -247,7 +248,9 @@ impl<'a, T: 'a> Iterator for CursorIter<'a, T> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.cursor.next()
+        let current = self.cursor.current();
+        self.cursor.move_next_cyclic();
+        current
     }
 }
 
@@ -255,7 +258,9 @@ impl<'a, T: 'a> Iterator for CursorIterMut<'a, T> {
     type Item = &'a mut T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.cursor.next()
+        let current = self.cursor.current_mut();
+        self.cursor.move_next_cyclic();
+        current
     }
 }
 
@@ -263,7 +268,8 @@ impl<'a, T: 'a> Iterator for CursorBackIter<'a, T> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.cursor.prev()
+        self.cursor.move_prev_cyclic();
+        self.cursor.current()
     }
 }
 
@@ -271,7 +277,8 @@ impl<'a, T: 'a> Iterator for CursorBackIterMut<'a, T> {
     type Item = &'a mut T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.cursor.prev()
+        self.cursor.move_prev_cyclic();
+        self.cursor.current_mut()
     }
 }
 
@@ -292,3 +299,11 @@ impl<'a, T: 'a> IntoIterator for CursorMut<'a, T> {
         CursorIterMut { cursor: self }
     }
 }
+
+unsafe impl<T: Sync> Send for Iter<'_, T> {}
+
+unsafe impl<T: Sync> Sync for Iter<'_, T> {}
+
+unsafe impl<T: Send> Send for IterMut<'_, T> {}
+
+unsafe impl<T: Sync> Sync for IterMut<'_, T> {}
