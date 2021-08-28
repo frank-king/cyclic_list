@@ -1,60 +1,66 @@
-use crate::list::{List, Node};
+use crate::list::{DetachedNodes, List, Node};
 use std::ptr::NonNull;
 
 pub struct Cursor<'a, T: 'a> {
+    #[cfg(feature = "length")]
     index: usize,
-    current: NonNull<Node<T>>,
+    pub(crate) current: NonNull<Node<T>>,
     pub(crate) list: &'a List<T>,
 }
 
 pub struct CursorMut<'a, T: 'a> {
+    #[cfg(feature = "length")]
     index: usize,
-    current: NonNull<Node<T>>,
+    pub(crate) current: NonNull<Node<T>>,
     pub(crate) list: &'a mut List<T>,
 }
 
 macro_rules! impl_cursor {
     ($CURSOR:ident) => {
         impl<'a, T: 'a> $CURSOR<'a, T> {
-            fn is_ghost(&self, ptr: NonNull<Node<T>>) -> bool {
-                ptr == self.list.ghost()
+            pub(crate) fn is_ghost_node(&self, ptr: NonNull<Node<T>>) -> bool {
+                ptr == self.list.ghost_node()
             }
-            fn next(&self) -> NonNull<Node<T>> {
+            pub(crate) fn next_node(&self) -> NonNull<Node<T>> {
                 // TODO: SAFETY
                 unsafe { self.current.as_ref().next }
             }
-            fn prev(&self) -> NonNull<Node<T>> {
+            pub(crate) fn prev_node(&self) -> NonNull<Node<T>> {
                 // TODO: SAFETY
                 unsafe { self.current.as_ref().prev }
             }
         }
 
         impl<'a, T: 'a> $CURSOR<'a, T> {
+            #[cfg(feature = "length")]
             pub fn index(&self) -> usize {
                 self.index
             }
 
-            pub fn move_next(&mut self) -> bool {
-                if !self.is_ghost(self.current) {
-                    // TODO: index
-                    self.current = self.next();
-                    return true;
+            pub fn move_next_cyclic(&mut self) {
+                #[cfg(feature = "length")]
+                if self.is_ghost_node(self.current) {
+                    self.index = 0;
+                } else {
+                    self.index += 1;
                 }
-                false
+                self.current = self.next_node();
             }
 
-            pub fn move_prev(&mut self) -> bool {
-                if !self.is_ghost(self.current) {
-                    // TODO: index
-                    self.current = self.prev();
-                    return true;
+            pub fn move_prev_cyclic(&mut self) {
+                #[cfg(feature = "length")]
+                if self.is_ghost_node(self.prev_node()) {
+                    self.index = self.list.len();
+                } else {
+                    self.index -= 1;
                 }
-                false
+                self.current = self.prev_node();
             }
 
+            // TODO: use `Iterator::advance_by` once stabled
             pub fn seek_forward(&mut self, step: usize) -> Result<(), usize> {
                 for i in 0..step {
-                    if !self.move_next() {
+                    if self.next().is_none() {
                         return Err(i);
                     }
                 }
@@ -63,7 +69,7 @@ macro_rules! impl_cursor {
 
             pub fn seek_backward(&mut self, step: usize) -> Result<(), usize> {
                 for i in 0..step {
-                    if !self.move_prev() {
+                    if self.prev().is_none() {
                         return Err(i);
                     }
                 }
@@ -71,7 +77,7 @@ macro_rules! impl_cursor {
             }
 
             pub fn current(&self) -> Option<&'a T> {
-                if self.is_ghost(self.current) {
+                if self.is_ghost_node(self.current) {
                     return None;
                 }
                 // TODO: SAFETY
@@ -79,19 +85,19 @@ macro_rules! impl_cursor {
             }
 
             pub fn peek_next(&self) -> Option<&'a T> {
-                if self.is_ghost(self.next()) {
+                if self.is_ghost_node(self.current) {
                     return None;
                 }
                 // TODO: SAFETY
-                unsafe { Some(&self.next().as_ref().element) }
+                unsafe { Some(&self.current.as_ref().element) }
             }
 
             pub fn peek_prev(&self) -> Option<&'a T> {
-                if self.is_ghost(self.prev()) {
+                if self.is_ghost_node(self.prev_node()) {
                     return None;
                 }
                 // TODO: SAFETY
-                unsafe { Some(&self.prev().as_ref().element) }
+                unsafe { Some(&self.prev_node().as_ref().element) }
             }
         }
     };
@@ -101,8 +107,13 @@ impl_cursor!(CursorMut);
 impl_cursor!(Cursor);
 
 impl<'a, T: 'a> Cursor<'a, T> {
-    pub(crate) fn new(index: usize, list: &'a List<T>, current: NonNull<Node<T>>) -> Self {
+    pub(crate) fn new(
+        list: &'a List<T>,
+        current: NonNull<Node<T>>,
+        #[cfg(feature = "length")] index: usize,
+    ) -> Self {
         Self {
+            #[cfg(feature = "length")]
             index,
             current,
             list,
@@ -111,118 +122,215 @@ impl<'a, T: 'a> Cursor<'a, T> {
 }
 
 impl<'a, T: 'a> CursorMut<'a, T> {
-    pub(crate) fn new(index: usize, list: &'a mut List<T>, current: NonNull<Node<T>>) -> Self {
+    pub(crate) fn new(
+        list: &'a mut List<T>,
+        current: NonNull<Node<T>>,
+        #[cfg(feature = "length")] index: usize,
+    ) -> Self {
         Self {
+            #[cfg(feature = "length")]
             index,
             current,
             list,
         }
     }
-    fn next_mut(&mut self) -> &mut Node<T> {
+    fn next_node_mut(&mut self) -> &mut Node<T> {
         // TODO: SAFETY
         unsafe { self.current.as_mut().next.as_mut() }
     }
-    fn prev_mut(&mut self) -> &mut Node<T> {
+    fn prev_node_mut(&mut self) -> &mut Node<T> {
         // TODO: SAFETY
         unsafe { self.current.as_mut().prev.as_mut() }
     }
-    fn insert(&mut self, mut prev: NonNull<Node<T>>, mut next: NonNull<Node<T>>, item: T) {
-        let node = Node::new(next, prev, item);
-        // TODO: SAFETY
-        unsafe {
-            self.list.splice_nodes(
-                prev,
-                next,
-                node,
-                node,
-                #[cfg(feature = "length")]
-                1,
-            );
-        }
+    unsafe fn insert_before(&mut self, mut next: NonNull<Node<T>>, item: T) -> NonNull<Node<T>> {
+        let node = Node::new_detached(item);
+        let detached = DetachedNodes::from_single(node);
+        self.list.attach_nodes(next.as_ref().prev, next, detached);
+        node
+    }
+}
+
+impl<'a, T: 'a> Cursor<'a, T> {
+    pub fn next(&mut self) -> Option<&'a T> {
+        let current = self.current();
+        self.move_next_cyclic();
+        current
+    }
+    pub fn prev(&mut self) -> Option<&'a T> {
+        self.move_prev_cyclic();
+        self.current()
     }
 }
 
 impl<'a, T: 'a> CursorMut<'a, T> {
-    pub fn current_mut(&mut self) -> Option<&'a mut T> {
-        if self.is_ghost(self.current) {
+    pub fn next(&mut self) -> Option<&'a mut T> {
+        let current = self.peek_mut();
+        self.move_next_cyclic();
+        current
+    }
+    pub fn prev(&mut self) -> Option<&'a mut T> {
+        self.move_prev_cyclic();
+        self.peek_mut()
+    }
+}
+
+impl<'a, T: 'a> CursorMut<'a, T> {
+    pub fn peek_mut(&mut self) -> Option<&'a mut T> {
+        if self.is_ghost_node(self.current) {
             return None;
         }
         // TODO: SAFETY
         unsafe { Some(&mut self.current.as_mut().element) }
     }
-    pub fn insert_front(&mut self, item: T) {
-        self.insert(self.list.ghost(), self.list.ghost_next(), item)
+
+    pub fn push_front(&mut self, item: T) {
+        self.list.push_front(item);
+        self.index += 1;
     }
 
-    pub fn insert_back(&mut self, item: T) {
-        self.insert(self.list.ghost_prev(), self.list.ghost(), item)
+    pub fn push_back(&mut self, item: T) {
+        self.list.push_back(item)
     }
 
-    pub fn insert_after(&mut self, item: T) {
-        self.insert(self.current, self.next(), item);
-        self.move_next();
+    pub fn insert(&mut self, item: T) {
+        self.current = unsafe { self.insert_before(self.current, item) }
     }
 
-    pub fn insert_before(&mut self, item: T) {
-        self.insert(self.prev(), self.current, item);
-    }
-
-    pub fn remove_current(&mut self) -> Option<T> {
-        if self.is_ghost(self.current) {
+    pub fn remove(&mut self) -> Option<T> {
+        if self.is_ghost_node(self.current) {
             return None;
         }
-        #[cfg(feature = "length")]
-        {
-            self.list.len -= 1;
-        }
-        self.next_mut().prev = self.prev();
-        self.prev_mut().next = self.next();
         // TODO: SAFETY
-        let node = unsafe { Box::from_raw(self.current.as_ptr()) };
-        self.current = self.next();
-        // TODO: index
+        let node = unsafe { self.list.detach_node(self.current) };
+        self.current = self.next_node();
         Some(Node::into_element(node))
     }
 
+    pub fn backspace(&mut self) -> Option<T> {
+        if self.is_ghost_node(self.prev_node()) {
+            return None;
+        }
+        self.move_prev_cyclic();
+        self.remove()
+    }
+
     pub fn as_cursor(&self) -> Cursor<'_, T> {
-        Cursor::new(self.index, self.list, self.current)
+        Cursor::new(self.list, self.current, self.index)
     }
 
-    pub fn split_after(&mut self) -> Option<List<T>> {
-        if self.is_ghost(self.current) || self.is_ghost(self.next()) {
+    pub fn into_cursor(self) -> Cursor<'a, T> {
+        Cursor::new(self.list, self.current, self.index)
+    }
+
+    pub fn split(&mut self) -> Option<List<T>> {
+        if self.is_ghost_node(self.current) || self.is_ghost_node(self.next_node()) {
             return None;
         }
-        let split_start = self.next();
-        let split_end = self.list.ghost_prev();
+        #[cfg(feature = "length")]
+        let len = self.list.len - self.index;
         // TODO: SAFETY
         unsafe {
-            self.current.as_mut().next = self.list.ghost();
-            Some(List::from_splice(
-                split_start,
-                split_end,
+            let detached = self.list.detach_nodes(
+                self.next_node(),
+                self.list.ghost_node_prev(),
                 #[cfg(feature = "length")]
-                {
-                    self.list.len - self.index
-                },
-            ))
+                len,
+            );
+            Some(List::from_detached(detached))
         }
     }
 
-    pub fn split_before(&mut self) -> Option<List<T>> {
-        if self.is_ghost(self.current) || self.is_ghost(self.prev()) {
-            return None;
+    pub fn splice(&mut self, other: List<T>) {
+        if let Some(detached) = other.into_detached() {
+            // TODO: SAFETY
+            unsafe {
+                self.list
+                    .attach_nodes(self.list.ghost_node(), self.current, detached);
+            }
         }
-        let split_start = self.prev();
-        let split_end = self.list.ghost_next();
-        // TODO: SAFETY
-        unsafe {
-            self.current.as_mut().prev = self.list.ghost();
-            Some(List::from_splice(
-                split_start,
-                split_end,
-                #[cfg(feature = "length")]
-                self.index,
-            ))
+    }
+}
+
+pub struct CursorIter<'a, T: 'a> {
+    pub(crate) cursor: Cursor<'a, T>,
+}
+
+pub struct CursorIterMut<'a, T: 'a> {
+    pub(crate) cursor: CursorMut<'a, T>,
+}
+
+pub struct CursorBackIter<'a, T: 'a> {
+    pub(crate) cursor: Cursor<'a, T>,
+}
+
+pub struct CursorBackIterMut<'a, T: 'a> {
+    pub(crate) cursor: CursorMut<'a, T>,
+}
+
+impl<'a, T: 'a> CursorIter<'a, T> {
+    pub fn into_cursor(self) -> Cursor<'a, T> {
+        self.cursor
+    }
+    pub fn rev(self) -> CursorBackIter<'a, T> {
+        CursorBackIter {
+            cursor: self.cursor,
         }
+    }
+}
+
+impl<'a, T: 'a> CursorIterMut<'a, T> {
+    pub fn into_cursor_mut(self) -> CursorMut<'a, T> {
+        self.cursor
+    }
+    pub fn rev(self) -> CursorBackIterMut<'a, T> {
+        CursorBackIterMut {
+            cursor: self.cursor,
+        }
+    }
+}
+
+impl<'a, T: 'a> CursorBackIter<'a, T> {
+    pub fn into_cursor(self) -> Cursor<'a, T> {
+        self.cursor
+    }
+    pub fn rev(self) -> CursorIter<'a, T> {
+        CursorIter {
+            cursor: self.cursor,
+        }
+    }
+}
+
+impl<'a, T: 'a> CursorBackIterMut<'a, T> {
+    pub fn into_cursor_mut(self) -> CursorMut<'a, T> {
+        self.cursor
+    }
+    pub fn rev(self) -> CursorIterMut<'a, T> {
+        CursorIterMut {
+            cursor: self.cursor,
+        }
+    }
+}
+
+impl<'a, T: 'a> From<CursorIter<'a, T>> for Cursor<'a, T> {
+    fn from(cursor_iter: CursorIter<'a, T>) -> Self {
+        cursor_iter.into_cursor()
+    }
+}
+
+impl<'a, T: 'a> From<CursorIterMut<'a, T>> for CursorMut<'a, T> {
+    fn from(cursor_iter: CursorIterMut<'a, T>) -> Self {
+        cursor_iter.into_cursor_mut()
+    }
+}
+
+impl<'a, T: 'a> From<CursorMut<'a, T>> for Cursor<'a, T> {
+    fn from(cursor: CursorMut<'a, T>) -> Self {
+        cursor.into_cursor()
+    }
+}
+
+impl<'a, T: 'a> From<CursorIterMut<'a, T>> for CursorIter<'a, T> {
+    fn from(cursor_iter: CursorIterMut<'a, T>) -> Self {
+        cursor_iter.into_cursor_mut().into_cursor().into_iter()
     }
 }

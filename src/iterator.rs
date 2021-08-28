@@ -1,3 +1,6 @@
+use crate::cursor::{
+    Cursor, CursorBackIter, CursorBackIterMut, CursorIter, CursorIterMut, CursorMut,
+};
 use crate::list::{List, Node};
 use std::iter::{FromIterator, FusedIterator};
 use std::marker::PhantomData;
@@ -13,8 +16,8 @@ pub struct Iter<'a, T: 'a> {
 
 impl<'a, T: 'a> Iter<'a, T> {
     pub(crate) fn new(list: &'a List<T>) -> Self {
-        let begin = list.ghost_next();
-        let end = list.ghost();
+        let begin = list.ghost_node_next();
+        let end = list.ghost_node();
         let _marker = PhantomData;
         #[cfg(feature = "length")]
         let len = list.len();
@@ -90,8 +93,8 @@ pub struct IterMut<'a, T: 'a> {
 
 impl<'a, T: 'a> IterMut<'a, T> {
     pub(crate) fn new(list: &'a mut List<T>) -> Self {
-        let begin = list.ghost_next();
-        let end = list.ghost();
+        let begin = list.ghost_node_next();
+        let end = list.ghost_node();
         let _marker = PhantomData;
         #[cfg(feature = "length")]
         let len = list.len();
@@ -237,5 +240,55 @@ impl<T> Extend<T> for List<T> {
 impl<'a, T: 'a + Copy> Extend<&'a T> for List<T> {
     fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) {
         self.extend(iter.into_iter().copied())
+    }
+}
+
+impl<'a, T: 'a> Iterator for CursorIter<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.cursor.next()
+    }
+}
+
+impl<'a, T: 'a> Iterator for CursorIterMut<'a, T> {
+    type Item = &'a mut T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.cursor.next()
+    }
+}
+
+impl<'a, T: 'a> Iterator for CursorBackIter<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.cursor.prev()
+    }
+}
+
+impl<'a, T: 'a> Iterator for CursorBackIterMut<'a, T> {
+    type Item = &'a mut T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.cursor.prev()
+    }
+}
+
+impl<'a, T: 'a> IntoIterator for Cursor<'a, T> {
+    type Item = &'a T;
+    type IntoIter = CursorIter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        CursorIter { cursor: self }
+    }
+}
+
+impl<'a, T: 'a> IntoIterator for CursorMut<'a, T> {
+    type Item = &'a mut T;
+    type IntoIter = CursorIterMut<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        CursorIterMut { cursor: self }
     }
 }

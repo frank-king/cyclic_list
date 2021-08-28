@@ -35,12 +35,12 @@ impl<T: Clone> Clone for List<T> {
         let mut cursor_mut = self.cursor_front_mut();
         for elem_other in iter_other {
             // FIXME incorrect cursor moves
-            match cursor_mut.current_mut() {
-                None => cursor_mut.insert_before(elem_other.clone()),
+            match cursor_mut.next() {
+                None => cursor_mut.insert(elem_other.clone()),
                 Some(elem) => elem.clone_from(elem_other),
             }
         }
-        cursor_mut.split_after();
+        cursor_mut.split();
     }
 }
 
