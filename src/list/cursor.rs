@@ -1383,3 +1383,302 @@ unsafe impl<T: Sync> Sync for CursorBackIter<'_, T> {}
 unsafe impl<T: Send> Send for CursorBackIterMut<'_, T> {}
 
 unsafe impl<T: Sync> Sync for CursorBackIterMut<'_, T> {}
+
+#[cfg(test)]
+mod tests {
+    use crate::list::cursor::{Cursor, CursorMut};
+    use crate::List;
+    use std::cmp::Ordering;
+    use std::fmt::Debug;
+    use std::iter::FromIterator;
+
+    #[test]
+    fn cursor_read() {
+        fn test_cursor_read<T, I>(list: I)
+        where
+            T: Debug + Eq + Clone,
+            I: IntoIterator<Item = T> + Clone,
+        {
+            let vec = Vec::from_iter(list.clone());
+            let len = vec.len();
+            let mut list = List::from_iter(list);
+            for i in 0..len {
+                assert_eq!(list.cursor(i).current(), vec.get(i));
+                assert_eq!(list.cursor_mut(i).current(), vec.get(i));
+            }
+            assert!(list.cursor(len).current().is_none());
+            assert!(list.cursor_mut(len).current().is_none());
+            for i in 1..=len {
+                assert_eq!(list.cursor(i).previous(), vec.get(i - 1));
+                assert_eq!(list.cursor_mut(i).previous(), vec.get(i - 1));
+            }
+            assert!(list.cursor(0).previous().is_none());
+            assert!(list.cursor_mut(0).previous().is_none());
+        }
+        test_cursor_read(0..5);
+        test_cursor_read(["123", "abc"]);
+        test_cursor_read(Some(0));
+        test_cursor_read::<i32, _>(None);
+    }
+
+    #[test]
+    fn cursor_write() {
+        fn test_cursor_write<T, F, I1, I2>(input: I1, f: F, expected: I2)
+        where
+            T: Debug + Eq + Clone,
+            F: FnMut(&mut T) + Clone,
+            I1: IntoIterator<Item = T> + Clone,
+            I2: IntoIterator<Item = T>,
+        {
+            let mut vec = Vec::from_iter(expected);
+            let len = vec.len();
+            let mut list = List::from_iter(input.clone());
+            for i in 0..len {
+                let mut f = f.clone();
+                assert_eq!(
+                    list.cursor_mut(i).current_mut().map(|item| {
+                        f(item);
+                        item
+                    }),
+                    vec.get_mut(i)
+                );
+            }
+            assert!(list.cursor_mut(len).current_mut().is_none());
+
+            let mut list = List::from_iter(input.clone());
+            for i in 1..=len {
+                let mut f = f.clone();
+                assert_eq!(
+                    list.cursor_mut(i).previous_mut().map(|item| {
+                        f(item);
+                        item
+                    }),
+                    vec.get_mut(i - 1)
+                );
+            }
+            assert!(list.cursor_mut(0).previous_mut().is_none());
+        }
+        test_cursor_write(0..5, |i| *i *= 2, [0, 2, 4, 6, 8]);
+        test_cursor_write(
+            [String::from("123"), String::from("abc")],
+            |s| s.push_str("#"),
+            [String::from("123#"), String::from("abc#")],
+        );
+        test_cursor_write(Some(0), |_| {}, Some(0));
+        test_cursor_write::<i32, _, _, _>(None, |i| *i *= 2, None);
+    }
+
+    #[test]
+    fn cursor_insert_and_remove() {
+        fn test_cursor_insert_and_remove<T, I1, I2>(input: I1, at: usize, item: T, expected: I2)
+        where
+            T: Debug + Eq + Clone,
+            I1: IntoIterator<Item = T>,
+            I2: IntoIterator<Item = T>,
+        {
+            let input = List::from_iter(input);
+            let mut list = input.clone();
+            let expected = List::from_iter(expected);
+            let mut cursor = list.cursor_mut(at);
+
+            cursor.insert(item.clone());
+            #[cfg(feature = "length")]
+            assert_eq!(cursor.index(), at + 1);
+            assert_eq!(cursor.previous(), Some(&item));
+            assert_eq!(cursor.view(), &expected);
+
+            assert_eq!(cursor.backspace(), Some(item.clone()));
+            #[cfg(feature = "length")]
+            assert_eq!(cursor.index(), at);
+            assert_eq!(cursor.view(), &input);
+
+            cursor.insert(item.clone());
+            assert!(cursor.move_prev().is_ok());
+            #[cfg(feature = "length")]
+            assert_eq!(cursor.index(), at);
+            assert_eq!(cursor.current(), Some(&item));
+            assert_eq!(cursor.view(), &expected);
+
+            assert_eq!(cursor.remove(), Some(item.clone()));
+            #[cfg(feature = "length")]
+            assert_eq!(cursor.index(), at);
+            assert_eq!(cursor.view(), &input);
+        }
+        test_cursor_insert_and_remove(0..5, 5, 5, 0..6);
+        test_cursor_insert_and_remove(0..5, 2, 5, (0..2).chain(Some(5)).chain(2..5));
+        test_cursor_insert_and_remove(0..5, 0, 5, (5..=5).chain(0..5));
+        test_cursor_insert_and_remove(0..2, 2, 2, [0, 1, 2]);
+        test_cursor_insert_and_remove(0..2, 1, 2, [0, 2, 1]);
+        test_cursor_insert_and_remove(0..2, 0, 2, [2, 0, 1]);
+        test_cursor_insert_and_remove(Some(0), 1, 1, [0, 1]);
+        test_cursor_insert_and_remove(Some(0), 0, 1, [1, 0]);
+        test_cursor_insert_and_remove(None, 0, 0, Some(0));
+
+        let mut empty = List::<i32>::new();
+        let mut cursor = empty.cursor_end_mut();
+
+        #[cfg(feature = "length")]
+        assert_eq!(cursor.index(), 0);
+        assert!(cursor.remove().is_none());
+
+        #[cfg(feature = "length")]
+        assert_eq!(cursor.index(), 0);
+        assert!(cursor.backspace().is_none());
+
+        #[cfg(feature = "length")]
+        assert_eq!(cursor.index(), 0);
+    }
+
+    #[test]
+    fn cursor_move() {
+        macro_rules! test_cursor_move(
+            ($FN:ident, $CURSOR:ident, $CURSOR_START:ident) => {
+                fn $FN(
+                    len: usize,
+                    relative_moves: impl IntoIterator<Item = isize>,
+                    invalid_relative_moves: impl IntoIterator<Item = isize>,
+                ) {
+                    #[allow(unused_mut)]
+                    let mut list = List::from_iter(0..len);
+                    let mut cursor = list.$CURSOR_START();
+                    let mut index = 0;
+                    let verify_cursor = |cursor: &$CURSOR<'_, _>, index| {
+                        #[cfg(feature = "length")]
+                        assert_eq!(cursor.index(), index);
+                        if index == len {
+                            assert!(cursor.current().is_none());
+                        } else {
+                            assert_eq!(cursor.current(), Some(&index));
+                        }
+                    };
+                    verify_cursor(&cursor, index);
+                    for mv in relative_moves {
+                        match mv.cmp(&0) {
+                            Ordering::Equal => {
+                                assert!(cursor.seek_forward(0).is_ok());
+                                verify_cursor(&cursor, index);
+                                assert!(cursor.seek_backward(0).is_ok());
+                            }
+                            Ordering::Less => assert!(cursor.seek_backward(-mv as usize).is_ok()),
+                            Ordering::Greater => assert!(cursor.seek_forward(mv as usize).is_ok()),
+                        }
+                        index = (index as isize + mv) as usize;
+                        verify_cursor(&cursor, index);
+                        assert!(cursor.try_seek_to(len + 1).is_err());
+                        verify_cursor(&cursor, index);
+                    }
+                    for mv in invalid_relative_moves {
+                        match mv.cmp(&0) {
+                            Ordering::Equal => {
+                                assert!(cursor.seek_forward(0).is_ok());
+                                verify_cursor(&cursor, index);
+                                assert!(cursor.seek_backward(0).is_ok());
+                                verify_cursor(&cursor, index);
+                            }
+                            Ordering::Less => assert_eq!(cursor.seek_backward(-mv as usize), Err(index)),
+                            Ordering::Greater => {
+                                assert_eq!(cursor.seek_forward(mv as usize), Err(len - index))
+                            }
+                        }
+                        index = (index as isize + mv).clamp(0, len as isize) as usize;
+                        verify_cursor(&cursor, index);
+                        assert!(cursor.try_seek_to(len + 1).is_err());
+                        verify_cursor(&cursor, index);
+                    }
+                }
+            }
+        );
+        test_cursor_move!(test_cursor_move, Cursor, cursor_start);
+        test_cursor_move!(test_cursor_mut_move, CursorMut, cursor_start_mut);
+
+        fn test_case(
+            len: usize,
+            relative_moves: impl IntoIterator<Item = isize> + Clone,
+            invalid_relative_moves: impl IntoIterator<Item = isize> + Clone,
+        ) {
+            test_cursor_move(len, relative_moves.clone(), invalid_relative_moves.clone());
+            test_cursor_mut_move(len, relative_moves, invalid_relative_moves);
+        }
+
+        test_case(10, [5, -3, 8, -10, 0, 5, 5], [10, 1, 0, -11, -5, 0]);
+        test_case(3, [1, 2, -1, -1, 0, -1, 3, -3], [10, -20, 0, -4, 5, 0]);
+        test_case(1, [1, -1, 1, 0, -1, 1, 0, -1], [3, -5, 0, -1, 2, 0]);
+        test_case(0, [0, 0], [2, -3, 0, -1, 1, 0]);
+    }
+
+    #[test]
+    fn cursor_iter() {
+        macro_rules! test_cursor_iter(
+            ($FN:ident, $CURSOR_START:ident, $INTO_CURSOR:ident) => {
+                fn $FN(len: usize, mid: usize) {
+                    #[allow(unused_mut)]
+                    let mut list = List::from_iter(0..len);
+                    let mut cursor_iter = list.$CURSOR_START().into_iter();
+                    for _ in 0..3 {
+                        for i in 0..len {
+                            assert_eq!(cursor_iter.next().copied(), Some(i));
+                        }
+                        assert_eq!(cursor_iter.next().copied(), None);
+                    }
+                    for i in 0..mid {
+                        assert_eq!(cursor_iter.next().copied(), Some(i));
+                    }
+
+                    let cursor = cursor_iter.$INTO_CURSOR();
+                    if mid == len {
+                        assert_eq!(cursor.current(), None);
+                    } else {
+                        assert_eq!(cursor.current(), Some(&mid));
+                    }
+                    let cursor_iter = cursor.into_iter();
+
+                    let mut cursor_iter = cursor_iter.rev();
+                    for i in (0..mid).rev() {
+                        assert_eq!(cursor_iter.next().copied(), Some(i));
+                    }
+                    assert_eq!(cursor_iter.next().copied(), None);
+                    for _ in 0..3 {
+                        for i in (0..len).rev() {
+                            assert_eq!(cursor_iter.next().copied(), Some(i));
+                        }
+                        assert_eq!(cursor_iter.next().copied(), None);
+                    }
+
+                    for i in (mid..len).rev() {
+                        assert_eq!(cursor_iter.next().copied(), Some(i));
+                    }
+
+                    let cursor = cursor_iter.$INTO_CURSOR();
+                    if mid == len {
+                        assert_eq!(cursor.current(), None);
+                    } else {
+                        assert_eq!(cursor.current(), Some(&mid));
+                    }
+
+                    let mut cursor_iter = cursor.into_iter();
+                    for i in mid..len {
+                        assert_eq!(cursor_iter.next().copied(), Some(i));
+                    }
+                }
+            };
+        );
+        test_cursor_iter!(test_cursor_iter, cursor_start, into_cursor);
+        test_cursor_iter!(test_cursor_iter_mut, cursor_start_mut, into_cursor_mut);
+
+        fn test_case(len: usize, mid: usize) {
+            test_cursor_iter(len, mid);
+            test_cursor_iter_mut(len, mid);
+        }
+
+        test_case(10, 10);
+        test_case(10, 5);
+        test_case(10, 1);
+        test_case(10, 0);
+        test_case(2, 2);
+        test_case(2, 1);
+        test_case(2, 0);
+        test_case(1, 1);
+        test_case(1, 0);
+        test_case(0, 0);
+    }
+}
