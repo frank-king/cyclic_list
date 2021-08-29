@@ -404,3 +404,84 @@ unsafe impl<T: Sync> Sync for Iter<'_, T> {}
 unsafe impl<T: Send> Send for IterMut<'_, T> {}
 
 unsafe impl<T: Sync> Sync for IterMut<'_, T> {}
+
+#[cfg(test)]
+mod tests {
+    use crate::List;
+    use std::fmt::Debug;
+    use std::iter::FromIterator;
+
+    #[test]
+    fn test_iter() {
+        macro_rules! test_iter {
+            ($FN:ident, $ITER:ident $(, $REV:ident)?) => {
+                fn $FN<T, I>(input: I, mid: usize)
+                where
+                    T: Eq + Debug + Clone,
+                    I: IntoIterator<Item = T>,
+                {
+                    #[allow(unused_mut)]
+                    let mut vec = Vec::from_iter(input);
+                    #[allow(unused_mut)]
+                    let mut list = List::from_iter(vec.clone());
+                    let len = vec.len();
+                    let mut iter = list.$ITER() $( .$REV() )?;
+                    for (i, item) in vec.$ITER() $( .$REV() )?.enumerate() {
+                        assert_eq!(iter.next(), Some(item));
+                        #[cfg(feature = "length")]
+                        assert_eq!(iter.len(), len - i - 1);
+                    }
+                    assert_eq!(iter.next(), None);
+                    assert_eq!(iter.next(), None);
+                    assert_eq!(iter.next_back(), None);
+                    #[cfg(feature = "length")]
+                    assert_eq!(iter.len(), 0);
+
+                    let mut iter = list.$ITER() $( .$REV() )?;
+                    for (i, item) in vec.$ITER() $( .$REV() )? .take(mid).enumerate() {
+                        assert_eq!(iter.next(), Some(item));
+                        #[cfg(feature = "length")]
+                        assert_eq!(iter.len(), len - i - 1);
+                    }
+                    let mut iter = iter.rev();
+                    for (i, item) in vec.$ITER() $( .$REV() )? .skip(mid).rev().enumerate() {
+                        assert_eq!(iter.next(), Some(item));
+                        #[cfg(feature = "length")]
+                        assert_eq!(iter.len(), len - mid - i - 1);
+                    }
+                    assert_eq!(iter.next(), None);
+                    assert_eq!(iter.next(), None);
+                    assert_eq!(iter.next_back(), None);
+                    #[cfg(feature = "length")]
+                    assert_eq!(iter.len(), 0);
+                }
+            };
+        }
+        test_iter!(test_iter, iter);
+        test_iter!(test_iter_mut, iter_mut);
+        test_iter!(test_back_iter, iter, rev);
+        test_iter!(test_back_iter_mut, iter_mut, rev);
+
+        fn test_case<T, I>(input: I, mid: usize)
+        where
+            T: Eq + Debug + Clone,
+            I: IntoIterator<Item = T> + Clone,
+        {
+            test_iter(input.clone(), mid);
+            test_iter_mut(input.clone(), mid);
+            test_back_iter(input.clone(), mid);
+            test_back_iter_mut(input.clone(), mid);
+        }
+        test_case(0..10, 10);
+        test_case(0..10, 8);
+        test_case(0..10, 5);
+        test_case(0..10, 2);
+        test_case(0..10, 0);
+        test_case(0..2, 2);
+        test_case(0..2, 1);
+        test_case(0..2, 0);
+        test_case(0..1, 1);
+        test_case(0..1, 0);
+        test_case(0..0, 0);
+    }
+}
