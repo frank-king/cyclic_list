@@ -1,4 +1,5 @@
 use crate::list::{List, Node};
+#[cfg(feature = "length")]
 use std::cmp::Ordering;
 use std::fmt;
 use std::fmt::Formatter;
@@ -175,11 +176,9 @@ macro_rules! impl_cursor {
             ///
             /// It is unsafe because if the moving passes through the ghost node,
             /// the index will be invalid.
+            #[cfg(feature = "length")]
             unsafe fn seek_forward_fast(&mut self, steps: usize) {
-                #[cfg(feature = "length")]
-                {
-                    self.index = self.index.saturating_add(steps);
-                }
+                self.index = self.index.saturating_add(steps);
                 (0..steps).for_each(|_| self.current = self.next_node());
             }
 
@@ -188,11 +187,9 @@ macro_rules! impl_cursor {
             ///
             /// It is unsafe because if the moving passes through the ghost node,
             /// the index will be invalid.
+            #[cfg(feature = "length")]
             unsafe fn seek_backward_fast(&mut self, steps: usize) {
-                #[cfg(feature = "length")]
-                {
-                    self.index = self.index.saturating_sub(steps);
-                }
+                self.index = self.index.saturating_sub(steps);
                 (0..steps).for_each(|_| self.current = self.prev_node());
             }
         }

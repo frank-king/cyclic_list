@@ -430,8 +430,10 @@ mod tests {
                     let mut vec = Vec::from_iter(input);
                     #[allow(unused_mut)]
                     let mut list = List::from_iter(vec.clone());
+                    #[cfg(feature = "length")]
                     let len = vec.len();
                     let mut iter = list.$ITER() $( .$REV() )?;
+                    #[cfg_attr(not(feature = "length"), allow(unused_variables))]
                     for (i, item) in vec.$ITER() $( .$REV() )?.enumerate() {
                         assert_eq!(iter.next(), Some(item));
                         #[cfg(feature = "length")]
@@ -444,12 +446,14 @@ mod tests {
                     assert_eq!(iter.len(), 0);
 
                     let mut iter = list.$ITER() $( .$REV() )?;
+                    #[cfg_attr(not(feature = "length"), allow(unused_variables))]
                     for (i, item) in vec.$ITER() $( .$REV() )? .take(mid).enumerate() {
                         assert_eq!(iter.next(), Some(item));
                         #[cfg(feature = "length")]
                         assert_eq!(iter.len(), len - i - 1);
                     }
                     let mut iter = iter.rev();
+                    #[cfg_attr(not(feature = "length"), allow(unused_variables))]
                     for (i, item) in vec.$ITER() $( .$REV() )? .skip(mid).rev().enumerate() {
                         assert_eq!(iter.next(), Some(item));
                         #[cfg(feature = "length")]

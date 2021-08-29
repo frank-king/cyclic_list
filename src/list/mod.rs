@@ -19,6 +19,10 @@ mod algorithms;
 /// - a pointer `ghost` that points to the ghost node;
 /// - a length field `len` indicating the length of the list. It can be disabled by
 ///   disabling the `length` feature in your `Cargo.toml`:
+/// ```text
+/// [dependencies]
+/// cyclic_list = { default-features = false }
+/// ```
 ///
 /// # Naming Conventions
 ///
@@ -1221,11 +1225,10 @@ mod tests {
             let other = List::from_iter(other);
             let spliced = List::from_iter(spliced);
 
-            let cloned = list.clone();
             list.splice_at(at, other.clone());
             assert_eq!(list, spliced);
             #[cfg(feature = "length")]
-            assert_eq!(list.len(), cloned.len() + other.len());
+            assert_eq!(list.len(), spliced.len());
         }
         test_list_splice(0..5, 5..7, 5, 0..7);
         test_list_splice(0..5, 5..7, 2, (0..2).chain(5..7).chain(2..5));
