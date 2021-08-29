@@ -2,10 +2,32 @@ use crate::list::cursor::{
     Cursor, CursorBackIter, CursorBackIterMut, CursorIter, CursorIterMut, CursorMut,
 };
 use crate::list::{List, Node};
+use std::fmt;
 use std::iter::{FromIterator, FusedIterator};
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
+/// An iterator over the elements of a `List`.
+///
+/// `start..end` denotes a subrange of the list.
+///
+/// Though the `Iter` does not hold a reference from the list,
+/// it actually *borrows* (immutably) from the list, so a phantom
+/// marker of `&'a List<T>` is added to protect the list from being
+/// write.
+///
+/// # Examples
+///
+/// ```compile_fail
+/// use cyclic_list::List;
+/// use std::iter::FromIterator;
+///
+/// let mut list = List::from_iter([1, 2, 3]);
+/// let mut iter = list.iter();
+/// list.push_back(4);
+/// println!("{:?}", iter.next());
+/// ```
+#[derive(Clone)]
 pub struct Iter<'a, T: 'a> {
     start: NonNull<Node<T>>,
     end: NonNull<Node<T>>,
@@ -32,14 +54,32 @@ impl<'a, T: 'a> Iter<'a, T> {
     }
 }
 
+impl<'a, T: fmt::Debug + 'a> fmt::Debug for Iter<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut f = f.debug_tuple("Iter");
+        // SAFETY: `start..end` is always a valid range of a list,
+        // and it is not empty here, so it is safe.
+        let mut ptr = self.start;
+        while ptr != self.end {
+            let current = unsafe { ptr.as_ref() };
+            f.field(&current.element);
+            ptr = current.next;
+        }
+        f.finish()
+    }
+}
+
 impl<'a, T: 'a> Iterator for Iter<'a, T> {
     type Item = &'a T;
 
+    /// Return `*start` and reset the iterating range to `(start.next)..end`,
+    /// or return `None` if `start..end` is already empty.
     fn next(&mut self) -> Option<Self::Item> {
         if self.start == self.end {
             return None;
         }
-        // TODO: SAFETY
+        // SAFETY: `start..end` is always a valid range of a list,
+        // and it is not empty here, so it is safe.
         let current = unsafe { self.start.as_ref() };
         self.start = current.next;
         #[cfg(feature = "length")]
@@ -63,13 +103,15 @@ impl<'a, T: 'a> Iterator for Iter<'a, T> {
 }
 
 impl<'a, T: 'a> DoubleEndedIterator for Iter<'a, T> {
+    /// Reset the iterating range to `start..(end.prev)` and return `*end`,
+    /// or return `None` if `start..end` is already empty.
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.start == self.end {
             return None;
         }
-        // TODO: SAFETY
+        // SAFETY: `start..end` is always a valid range of a list,
+        // and it is not empty here, so it is safe.
         self.end = unsafe { self.end.as_ref().prev };
-        // TODO: SAFETY
         let current = unsafe { self.end.as_ref() };
         #[cfg(feature = "length")]
         {
@@ -84,6 +126,27 @@ impl<'a, T: 'a> ExactSizeIterator for Iter<'a, T> {}
 
 impl<'a, T: 'a> FusedIterator for Iter<'a, T> {}
 
+/// A mutable iterator over the elements of a `List`.
+///
+/// `start..end` denotes a subrange of the list.
+///
+/// Though the `IterMut` does not hold a reference from the list,
+/// it actually *borrows* (mutably) from the list, so a phantom
+/// marker of `&'a mut List<T>` is added to protect the list from
+/// begin read.
+///
+/// # Examples
+///
+/// `List` is not readable after an `IterMut` is created.
+/// ```compile_fail
+/// use cyclic_list::List;
+/// use std::iter::FromIterator;
+///
+/// let mut list = List::from_iter([1, 2, 3]);
+/// let mut iter = list.iter_mut();
+/// println!("{:?}", list.back());
+/// println!("{:?}", iter.next());
+/// ```
 pub struct IterMut<'a, T: 'a> {
     start: NonNull<Node<T>>,
     end: NonNull<Node<T>>,
@@ -109,14 +172,32 @@ impl<'a, T: 'a> IterMut<'a, T> {
     }
 }
 
+impl<'a, T: fmt::Debug + 'a> fmt::Debug for IterMut<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut f = f.debug_tuple("IterMut");
+        // SAFETY: `start..end` is always a valid range of a list,
+        // and it is not empty here, so it is safe.
+        let mut ptr = self.start;
+        while ptr != self.end {
+            let current = unsafe { ptr.as_ref() };
+            f.field(&current.element);
+            ptr = current.next;
+        }
+        f.finish()
+    }
+}
+
 impl<'a, T: 'a> Iterator for IterMut<'a, T> {
     type Item = &'a mut T;
 
+    /// Return `*start` and reset the iterating range to `(start.next)..end`,
+    /// or return `None` if `start..end` is already empty.
     fn next(&mut self) -> Option<Self::Item> {
         if self.start == self.end {
             return None;
         }
-        // TODO: SAFETY
+        // SAFETY: `start..end` is always a valid range of a list,
+        // and it is not empty here, so it is safe.
         let current = unsafe { self.start.as_mut() };
         self.start = current.next;
         #[cfg(feature = "length")]
@@ -145,11 +226,14 @@ impl<'a, T: 'a> ExactSizeIterator for IterMut<'a, T> {}
 impl<'a, T: 'a> FusedIterator for IterMut<'a, T> {}
 
 impl<'a, T: 'a> DoubleEndedIterator for IterMut<'a, T> {
+    /// Reset the iterating range to `start..(end.prev)` and return `*end`,
+    /// or return `None` if `start..end` is already empty.
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.start == self.end {
             return None;
         }
-        // TODO: SAFETY
+        // SAFETY: `start..end` is always a valid range of a list,
+        // and it is not empty here, so it is safe.
         self.end = unsafe { self.end.as_ref().prev };
         // TODO: SAFETY
         let current = unsafe { self.end.as_mut() };
@@ -161,8 +245,22 @@ impl<'a, T: 'a> DoubleEndedIterator for IterMut<'a, T> {
     }
 }
 
+/// An owning iterator over the elements of a `List`.
+///
+/// This `struct` is created by the [`into_iter`] method on [`List`]
+/// (provided by the `IntoIterator` trait). See its documentation for more.
+///
+/// [`into_iter`]: List::into_iter
 pub struct IntoIter<T> {
     list: List<T>,
+}
+
+impl<T: fmt::Debug> fmt::Debug for IntoIter<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("IntoIter")
+            .field("list", &self.list)
+            .finish()
+    }
 }
 
 impl<T> Iterator for IntoIter<T> {

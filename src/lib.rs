@@ -85,40 +85,9 @@
 //!
 //! As the names suggest, they are like cursors and can move forward or backward
 //! over the list. In a list with length *n*, there are *n* + 1 valid locations
-//! for the cursor, indexed by 0, 1, ..., *n*.
+//! for the cursor, indexed by 0, 1, ..., *n*, where *n* is the ghost node of the
+//! list.
 //!
-//! Here is a simple example showing how the cursors work. (The ghost node of the
-//! list is denoted by `#`).
-//! ```
-//! use cyclic_list::List;
-//! use std::iter::FromIterator;
-//!
-//! // Create a list: [ A B C D #]
-//! let list = List::from_iter(['A', 'B', 'C', 'D']);
-//!
-//! // Create a cursor at start: [|A B C D #] (index = 0)
-//! let mut cursor = list.cursor_start();
-//! assert_eq!(cursor.current(), Some(&'A'));
-//!
-//! // Move cursor forward: [ A|B C D #] (index = 1)
-//! assert!(cursor.move_next().is_ok());
-//! assert_eq!(cursor.current(), Some(&'B'));
-//!
-//! // Create a cursor in the end: [ A B C D|#] (index = 4)
-//! let mut cursor = list.cursor_end();
-//! assert_eq!(cursor.current(), None);
-//!
-//! // Move cursor backward: [ A B C|D #] (index = 3)
-//! assert!(cursor.move_prev().is_ok());
-//! assert_eq!(cursor.current(), Some(&'D'));
-//!
-//! // Create a cursor in the end and move forward: [ A B C D|#] (index = 4)
-//! let mut cursor = list.cursor_end();
-//! assert!(cursor.move_next().is_err());
-//! // Move cursor forward, cyclically: [|A B C D #] (index = 0)
-//! cursor.move_next_cyclic();
-//! assert_eq!(cursor.current(), Some(&'A'));
-//! ```
 //! Cursors can also be used as iterators, but are cyclic and not fused.
 //!
 //! **Warning**: Though cursor iterators have methods `rev`, they **DO NOT** behave
@@ -150,8 +119,6 @@
 //!
 //! [`CursorMut`] provides many useful ways to mutate the list in any position.
 //! - [`insert`]: insert an item at the cursor;
-//! - [`append`]: the same as [`insert`], except the cursor is moved forward
-//!   **after** insertion;
 //! - [`remove`]: remove the item at the cursor;
 //! - [`backspace`]: the same as [`remove`], except the cursor is moved backward
 //!   **before** removing;
@@ -160,7 +127,6 @@
 //!
 //! See more functions in [`CursorMut`].
 //!
-//! # Algorithms
 //! ```
 //! use cyclic_list::List;
 //! use std::iter::FromIterator;
@@ -168,12 +134,18 @@
 //! let mut list = List::from_iter([1, 2, 3, 4]);
 //!
 //! let mut cursor = list.cursor_start_mut();
-//! cursor.insert(5);
-//! assert_eq!(Vec::from_iter(cursor.view().iter().copied()), vec![5, 1, 2, 3, 4]);
-//! assert_eq!(cursor.current(), Some(&5));
-//! assert!(cursor.seek_forward(3).is_ok());
-//! assert_eq!(cursor.remove(), Some(3));
+//!
+//! cursor.insert(5); // becomes [5, 1, 2, 3, 4], points to 1
+//! assert_eq!(cursor.current(), Some(&1));
+//!
+//! assert!(cursor.seek_forward(2).is_ok());
+//! assert_eq!(cursor.remove(), Some(3)); // becomes [5, 1, 2, 4], points to 4
+//! assert_eq!(cursor.current(), Some(&4));
+//!
+//! assert_eq!(Vec::from_iter(list), vec![5, 1, 2, 4]);
 //! ```
+//!
+//! # Algorithms
 //!
 //! TODO
 //!

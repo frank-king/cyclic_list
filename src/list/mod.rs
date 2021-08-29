@@ -14,6 +14,12 @@ mod algorithms;
 /// The `List` is a doubly-linked list with owned nodes, implemented as a cyclic list.
 /// It allows inserting, removing elements at any given position in constant time.
 /// In compromise, accessing or mutating elements at any position take *O*(*n*) time.
+///
+/// # Naming Conventions
+///
+/// - `front..=back`: a closed range of list nodes, both inclusive;
+/// - `start..end`: a half-open range of list nodes, left inclusive and right
+///   exclusive (probably the ghost node).
 pub struct List<T> {
     ghost: Box<Node<Erased>>,
     #[cfg(feature = "length")]
@@ -32,6 +38,11 @@ pub(crate) struct Node<T> {
 #[derive(Default)]
 struct Erased;
 
+/// Nodes fragment detached from a list, used in list splitting or
+/// splicing.
+///
+/// When detached from a list, reading of `front.prev` and `back.next`
+/// is invalid.
 pub(crate) struct DetachedNodes<T> {
     pub(crate) front: NonNull<Node<T>>,
     pub(crate) back: NonNull<Node<T>>,
@@ -39,6 +50,7 @@ pub(crate) struct DetachedNodes<T> {
     pub(crate) len: usize,
 }
 
+// private methods
 impl<T> List<T> {
     pub(crate) fn ghost_node(&self) -> NonNull<Node<T>> {
         NonNull::from(self.ghost.as_ref()).cast()
@@ -54,6 +66,12 @@ impl<T> List<T> {
         NonNull::from(unsafe { self.ghost_node().as_ref().prev.as_ref() }).cast()
     }
 
+    /// Detach a single node `node` from the list, and return it as a box.
+    ///
+    /// It is unsafe because it does not check whether `node` belongs to the list.
+    ///
+    /// If the `node` does not belong to the list, this function call will make
+    /// the list ill-formed.
     pub(crate) unsafe fn detach_node(&mut self, node: NonNull<Node<T>>) -> Box<Node<T>> {
         #[cfg(feature = "length")]
         {
@@ -65,6 +83,47 @@ impl<T> List<T> {
         next.as_mut().prev = prev;
         node
     }
+
+    /// Attach a single node `node` to the list, between `prev` and `next`.
+    ///
+    /// It is unsafe because it does not check whether `prev` and `next` belongs
+    /// to the list, or whether the `prev` and `next` is adjacent (only in
+    /// `#[cfg(debug_assertions)]`).
+    ///
+    /// If the `prev` and `next` does not belong to the list, or they are not
+    /// adjacent nodes, this function call will make the list ill-formed.
+    pub(crate) unsafe fn attach_node(
+        &mut self,
+        mut prev: NonNull<Node<T>>,
+        mut next: NonNull<Node<T>>,
+        mut node: NonNull<Node<T>>,
+    ) {
+        #[cfg(debug_assertions)]
+        assert_adjacent(prev, next);
+        prev.as_mut().next = node;
+        next.as_mut().prev = node;
+        node.as_mut().prev = prev;
+        node.as_mut().next = next;
+        #[cfg(feature = "length")]
+        {
+            self.len += 1;
+        }
+        #[cfg(debug_assertions)]
+        {
+            assert_adjacent(prev, node);
+            assert_adjacent(node, next);
+        }
+    }
+
+    /// Detach a range of nodes `front..=back` from the list, and return the detached
+    /// nodes.
+    ///
+    /// It is unsafe because it does not check whether `front..=back` is a valid range
+    /// (i.e. `front` must **NOT** be at the right of `back`), or whether it belongs
+    /// to the list.
+    ///
+    /// If `front..=back` is not a valid range or it does not belong to the list,
+    /// this function call will make the list ill-formed.
     pub(crate) unsafe fn detach_nodes(
         &mut self,
         front: NonNull<Node<T>>,
@@ -85,6 +144,42 @@ impl<T> List<T> {
             len,
         )
     }
+
+    /// Attach a range of detached nodes to the list, between `prev` and `next`.
+    ///
+    /// It is unsafe because it does not check whether `prev` and `next` belongs
+    /// to the list, or whether the `prev` and `next` is adjacent (only in
+    /// `#[cfg(debug_assertions)]`).
+    ///
+    /// If the `prev` and `next` does not belong to the list, or they are not
+    /// adjacent nodes, this function call will make the list ill-formed.
+    pub(crate) unsafe fn attach_nodes(
+        &mut self,
+        mut prev: NonNull<Node<T>>,
+        mut next: NonNull<Node<T>>,
+        mut detached: DetachedNodes<T>,
+    ) {
+        #[cfg(debug_assertions)]
+        assert_adjacent(prev, next);
+        prev.as_mut().next = detached.front;
+        next.as_mut().prev = detached.back;
+        detached.front.as_mut().prev = prev;
+        detached.back.as_mut().next = next;
+        #[cfg(feature = "length")]
+        {
+            self.len += detached.len;
+        }
+        #[cfg(debug_assertions)]
+        {
+            assert_adjacent(prev, detached.front);
+            assert_adjacent(detached.back, next);
+        }
+    }
+
+    /// Detach all nodes from the list, and return the detached nodes, or return
+    /// `None` if the list is empty.
+    ///
+    /// It is safe because `self.front_node()..=self.back_node()` is a valid range.
     pub(crate) fn detach_all_nodes(&mut self) -> Option<DetachedNodes<T>> {
         if self.is_empty() {
             return None;
@@ -99,36 +194,10 @@ impl<T> List<T> {
         }
     }
 
-    pub(crate) unsafe fn attach_node(
-        &mut self,
-        mut prev: NonNull<Node<T>>,
-        mut next: NonNull<Node<T>>,
-        mut node: NonNull<Node<T>>,
-    ) {
-        prev.as_mut().next = node;
-        next.as_mut().prev = node;
-        node.as_mut().prev = prev;
-        node.as_mut().next = next;
-        #[cfg(feature = "length")]
-        {
-            self.len += 1;
-        }
-    }
-    pub(crate) unsafe fn attach_nodes(
-        &mut self,
-        mut prev: NonNull<Node<T>>,
-        mut next: NonNull<Node<T>>,
-        mut detached: DetachedNodes<T>,
-    ) {
-        prev.as_mut().next = detached.front;
-        next.as_mut().prev = detached.back;
-        detached.front.as_mut().prev = prev;
-        detached.back.as_mut().next = next;
-        #[cfg(feature = "length")]
-        {
-            self.len += detached.len;
-        }
-    }
+    /// Construct a list from detached nodes.
+    ///
+    /// It is safe because the detached nodes is guaranteed to be a valid range
+    /// when construction.
     pub(crate) fn from_detached(detached: DetachedNodes<T>) -> Self {
         let mut list = List::new();
         // TODO: SAFETY
@@ -137,6 +206,8 @@ impl<T> List<T> {
         }
         list
     }
+
+    /// Like [`List::detach_all_nodes`], but consume the list.
     pub(crate) fn into_detached(mut self) -> Option<DetachedNodes<T>> {
         self.detach_all_nodes()
     }
@@ -365,6 +436,9 @@ impl<T> List<T> {
     /// assert_eq!(list.pop_front(), None);
     /// ```
     pub fn pop_front(&mut self) -> Option<T> {
+        if self.is_empty() {
+            return None;
+        }
         self.cursor_start_mut().remove()
     }
 
@@ -403,6 +477,9 @@ impl<T> List<T> {
     /// assert_eq!(list.pop_back(), Some(3));
     /// ```
     pub fn pop_back(&mut self) -> Option<T> {
+        if self.is_empty() {
+            return None;
+        }
         self.cursor_end_mut().backspace()
     }
 
@@ -560,14 +637,87 @@ impl<T> List<T> {
         )
     }
 
+    /// Provides a forward iterator.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cyclic_list::List;
+    ///
+    /// let mut list = List::new();
+    ///
+    /// list.push_back(0);
+    /// list.push_back(1);
+    /// list.push_back(2);
+    ///
+    /// let mut iter = list.iter();
+    /// assert_eq!(iter.next(), Some(&0));
+    /// assert_eq!(iter.next(), Some(&1));
+    /// assert_eq!(iter.next(), Some(&2));
+    /// assert_eq!(iter.next(), None);
+    /// ```
+    #[inline]
     pub fn iter(&self) -> Iter<'_, T> {
         Iter::new(self)
     }
 
+    /// Provides a forward iterator with mutable references.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cyclic_list::List;
+    ///
+    /// let mut list = List::new();
+    ///
+    /// list.push_back(0);
+    /// list.push_back(1);
+    /// list.push_back(2);
+    ///
+    /// for element in list.iter_mut() {
+    ///     *element += 10;
+    /// }
+    ///
+    /// let mut iter = list.iter();
+    /// assert_eq!(iter.next(), Some(&10));
+    /// assert_eq!(iter.next(), Some(&11));
+    /// assert_eq!(iter.next(), Some(&12));
+    /// assert_eq!(iter.next(), None);
+    /// ```
+    #[inline]
     pub fn iter_mut(&mut self) -> IterMut<'_, T> {
         IterMut::new(self)
     }
 
+    /// Moves all elements from `other` to the end of the list.
+    ///
+    /// This reuses all the nodes from `other` and moves them into `self`. After
+    /// this operation, `other` becomes empty.
+    ///
+    /// This operation should compute in *O*(1) time and *O*(1) memory.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cyclic_list::List;
+    ///
+    /// let mut list1 = List::new();
+    /// list1.push_back('a');
+    ///
+    /// let mut list2 = List::new();
+    /// list2.push_back('b');
+    /// list2.push_back('c');
+    ///
+    /// list1.append(&mut list2);
+    ///
+    /// let mut iter = list1.iter();
+    /// assert_eq!(iter.next(), Some(&'a'));
+    /// assert_eq!(iter.next(), Some(&'b'));
+    /// assert_eq!(iter.next(), Some(&'c'));
+    /// assert!(iter.next().is_none());
+    ///
+    /// assert!(list2.is_empty());
+    /// ```
     pub fn append(&mut self, other: &mut Self) {
         if let Some(detached) = other.detach_all_nodes() {
             // TODO: SAFETY
@@ -575,6 +725,34 @@ impl<T> List<T> {
         }
     }
 
+    /// Moves all elements from `other` to the begin of the list.
+    /// This reuses all the nodes from `other` and moves them into `self`. After
+    /// this operation, `other` becomes empty.
+    ///
+    /// This operation should compute in *O*(1) time and *O*(1) memory.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cyclic_list::List;
+    ///
+    /// let mut list1 = List::new();
+    /// list1.push_back('a');
+    ///
+    /// let mut list2 = List::new();
+    /// list2.push_back('b');
+    /// list2.push_back('c');
+    ///
+    /// list2.prepend(&mut list1);
+    ///
+    /// let mut iter = list2.iter();
+    /// assert_eq!(iter.next(), Some(&'a'));
+    /// assert_eq!(iter.next(), Some(&'b'));
+    /// assert_eq!(iter.next(), Some(&'c'));
+    /// assert!(iter.next().is_none());
+    ///
+    /// assert!(list1.is_empty());
+    /// ```
     pub fn prepend(&mut self, other: &mut Self) {
         if let Some(detached) = other.detach_all_nodes() {
             // TODO: SAFETY
@@ -688,7 +866,14 @@ impl<T: Debug> Debug for List<T> {
     }
 }
 
+impl<T> Default for List<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> Node<T> {
+    /// Create a detached node with given element.
     pub(crate) fn new_detached(element: T) -> NonNull<Node<T>> {
         // SAFETY:
         // - `node.element` is manually written, so it is safe;
@@ -708,7 +893,10 @@ impl<T> Node<T> {
 }
 
 impl<T> DetachedNodes<T> {
-    fn new(
+    /// If is unsafe because it must be guaranteed that `front..=back` is
+    /// a valid range and its length must be equal to `len` (with
+    /// `#[cfg(feature = "length")]`).
+    unsafe fn new(
         front: NonNull<Node<T>>,
         back: NonNull<Node<T>>,
         #[cfg(feature = "length")] len: usize,
@@ -733,6 +921,14 @@ fn new_ghost() -> Box<Node<Erased>> {
     ghost.next = ghost_ptr;
     ghost.prev = ghost_ptr;
     ghost
+}
+
+#[cfg(debug_assertions)]
+fn assert_adjacent<T>(prev: NonNull<Node<T>>, next: NonNull<Node<T>>) {
+    unsafe {
+        assert_eq!(prev.as_ref().next, next);
+        assert_eq!(next.as_ref().prev, prev);
+    }
 }
 
 impl<T> Drop for List<T> {
