@@ -1,5 +1,8 @@
 # Double-Linked List
 
+This crate provides a doubly-linked list with owned nodes, implemented as a
+cyclic list.
+
 ## Usage
 
 First, add dependency in your `Cargo.toml`:
@@ -33,9 +36,6 @@ assert_eq!(cursor.view(), &List::from_iter([5, 0, 1, 2, 4]));
 ```
 
 ## Introduction
-
-This crate provides a doubly-linked list with owned nodes, implemented as a
-cyclic list.
 
 The `List` allows inserting, removing elements at any given position in
 constant time. In compromise, accessing or mutating elements at any position
