@@ -5,9 +5,31 @@
 //! constant time. In compromise, accessing or mutating elements at any position
 //! take *O*(*n*) time.
 //!
+//! Here is a quick example showing hwo the list works.
+//!
+//! ```
+//! use cyclic_list::List;
+//! use std::iter::FromIterator;
+//!
+//! let mut list = List::from_iter([1, 2, 3, 4]);
+//!
+//! let mut cursor = list.cursor_start_mut();
+//!
+//! cursor.insert(0); // insert 0 at the beginning of the list
+//! assert_eq!(cursor.current(), Some(&1));
+//! assert_eq!(cursor.view(), &List::from_iter([0, 1, 2, 3, 4]));
+//!
+//! cursor.seek_to(3); // move the cursor to position 3, and removes it.
+//! assert_eq!(cursor.remove(), Some(3));
+//! assert_eq!(cursor.view(), &List::from_iter([0, 1, 2, 4]));
+//!
+//! cursor.push_front(5); // pushing front to the list is also allowed
+//! assert_eq!(cursor.view(), &List::from_iter([5, 0, 1, 2, 4]));
+//! ```
+//!
 //! # Memory Layout
 //!
-//! The memory layout is like the following graph:
+//! The memory layout of the list is like the following graph:
 //! ```text
 //!          ┌─────────────────────────────────────────────────────────────────────┐
 //!          ↓                                                     (Ghost) Node N  │
@@ -62,6 +84,9 @@
 //! double-ended iterators and iterate the list like an array (fused and non-cyclic).
 //! [`IterMut`] provides mutability of the elements (but not the linked structure of
 //! the list).
+//!
+//! ## Examples
+//!
 //! ```
 //! use cyclic_list::List;
 //! use std::iter::FromIterator;
@@ -94,6 +119,8 @@
 //! as double-ended iterators. Instead, they create a new iterator that reverses
 //! the moving direction of the cursor.
 //!
+//! ## Examples
+//!
 //! ```
 //! use cyclic_list::List;
 //! use std::iter::FromIterator;
@@ -118,14 +145,13 @@
 //! # Cursor Mutations
 //!
 //! [`CursorMut`] provides many useful ways to mutate the list in any position.
-//! - [`insert`]: insert an item at the cursor;
+//! - [`insert`]: insert a new item at the cursor;
 //! - [`remove`]: remove the item at the cursor;
-//! - [`backspace`]: the same as [`remove`], except the cursor is moved backward
-//!   **before** removing;
+//! - [`backspace`]: remove the item before the cursor;
 //! - [`split`]: split the list into a new one, from the cursor position to the end;
 //! - [`splice`]: splice another list before the cursor position;
 //!
-//! See more functions in [`CursorMut`].
+//! ## Examples
 //!
 //! ```
 //! use cyclic_list::List;
@@ -142,8 +168,13 @@
 //! assert_eq!(cursor.remove(), Some(3)); // becomes [5, 1, 2, 4], points to 4
 //! assert_eq!(cursor.current(), Some(&4));
 //!
-//! assert_eq!(Vec::from_iter(list), vec![5, 1, 2, 4]);
+//! assert_eq!(cursor.backspace(), Some(2)); // becomes [5, 1, 4], points to 4
+//! assert_eq!(cursor.current(), Some(&4));
+//!
+//! assert_eq!(Vec::from_iter(list), vec![5, 1, 4]);
 //! ```
+//!
+//! See more functions in [`CursorMut`].
 //!
 //! # Algorithms
 //!
@@ -165,7 +196,9 @@
 //! [`split`]: crate::list::cursor::CursorMut::split
 //! [`splice`]: crate::list::cursor::CursorMut::splice
 
+#[doc(inline)]
 pub use list::iterator::{IntoIter, Iter, IterMut};
+#[doc(inline)]
 pub use list::List;
 
 pub mod list;

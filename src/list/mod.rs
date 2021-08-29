@@ -15,6 +15,11 @@ mod algorithms;
 /// It allows inserting, removing elements at any given position in constant time.
 /// In compromise, accessing or mutating elements at any position take *O*(*n*) time.
 ///
+/// The `List` contains:
+/// - a pointer `ghost` that points to the ghost node;
+/// - a length field `len` indicating the length of the list. It can be disabled by
+///   disabling the `length` feature in your `Cargo.toml`:
+///
 /// # Naming Conventions
 ///
 /// - `front..=back`: a closed range of list nodes, both inclusive;
@@ -48,6 +53,7 @@ pub(crate) struct DetachedNodes<T> {
     pub(crate) back: NonNull<Node<T>>,
     #[cfg(feature = "length")]
     pub(crate) len: usize,
+    _marker: PhantomData<Box<Node<T>>>,
 }
 
 // private methods
@@ -236,6 +242,8 @@ impl<T> List<T> {
 
     /// Returns `true` if the `List` is empty.
     ///
+    /// # Complexity
+    ///
     /// This operation should compute in *O*(1) time.
     ///
     /// # Examples
@@ -255,6 +263,8 @@ impl<T> List<T> {
     }
 
     /// Returns the length of the `List`. Enabled by `feature = "length"`.
+    ///
+    /// # Complexity
     ///
     /// This operation should compute in *O*(1) time.
     ///
@@ -282,6 +292,8 @@ impl<T> List<T> {
     }
 
     /// Removes all elements from the `List`.
+    ///
+    /// # Complexity
     ///
     /// This operation should compute in *O*(*n*) time.
     ///
@@ -396,6 +408,8 @@ impl<T> List<T> {
 
     /// Adds an element first in the list.
     ///
+    /// # Complexity
+    ///
     /// This operation should compute in *O*(1) time.
     ///
     /// # Examples
@@ -417,6 +431,8 @@ impl<T> List<T> {
 
     /// Removes the first element and returns it, or `None` if the list is
     /// empty.
+    ///
+    /// # Complexity
     ///
     /// This operation should compute in *O*(1) time.
     ///
@@ -443,6 +459,8 @@ impl<T> List<T> {
 
     /// Appends an element to the back of a list.
     ///
+    /// # Complexity
+    ///
     /// This operation should compute in *O*(1) time.
     ///
     /// # Examples
@@ -461,6 +479,8 @@ impl<T> List<T> {
 
     /// Removes the last element from a list and returns it, or `None` if
     /// it is empty.
+    ///
+    /// # Complexity
     ///
     /// This operation should compute in *O*(1) time.
     ///
@@ -704,6 +724,8 @@ impl<T> List<T> {
     /// This reuses all the nodes from `other` and moves them into `self`. After
     /// this operation, `other` becomes empty.
     ///
+    /// # Complexity
+    ///
     /// This operation should compute in *O*(1) time and *O*(1) memory.
     ///
     /// # Examples
@@ -740,6 +762,8 @@ impl<T> List<T> {
     /// This reuses all the nodes from `other` and moves them into `self`. After
     /// this operation, `other` becomes empty.
     ///
+    /// # Complexity
+    ///
     /// This operation should compute in *O*(1) time and *O*(1) memory.
     ///
     /// # Examples
@@ -775,6 +799,8 @@ impl<T> List<T> {
     /// Splits the list into two at the given index. Returns everything after
     /// the given index (inclusive).
     ///
+    /// # Complexity
+    ///
     /// This operation should compute in *O*(*n*) time.
     ///
     /// # Panics
@@ -808,6 +834,8 @@ impl<T> List<T> {
     }
 
     /// Removes the element at the given index and returns it.
+    ///
+    /// # Complexity
     ///
     /// This operation should compute in *O*(*n*) time.
     ///
@@ -844,6 +872,8 @@ impl<T> List<T> {
 
     /// Adds an element at the given index in the list.
     ///
+    /// # Complexity
+    ///
     /// This operation should compute in *O*(*n*) time.
     ///
     /// # Panics
@@ -874,6 +904,8 @@ impl<T> List<T> {
     }
 
     /// Splices another list at the given index.
+    ///
+    /// # Complexity
     ///
     /// This operation should compute in *O*(*n*) time.
     ///
@@ -945,6 +977,7 @@ impl<T> DetachedNodes<T> {
         back: NonNull<Node<T>>,
         #[cfg(feature = "length")] len: usize,
     ) -> Self {
+        let _marker = PhantomData;
         #[cfg(feature = "length")]
         debug_assert!(len > 0, "Cannot detach nodes of length 0");
         Self {
@@ -952,6 +985,7 @@ impl<T> DetachedNodes<T> {
             back,
             #[cfg(feature = "length")]
             len,
+            _marker,
         }
     }
 }

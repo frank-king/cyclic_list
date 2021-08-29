@@ -9,7 +9,8 @@ use std::ptr::NonNull;
 
 /// An iterator over the elements of a `List`.
 ///
-/// `start..end` denotes a subrange of the list.
+/// It uses a pair of nodes `start..end` to represent a half-open subrange
+/// of the list, where `start` is inclusive and `end` is not.
 ///
 /// Though the `Iter` does not hold a reference from the list,
 /// it actually *borrows* (immutably) from the list, so a phantom
@@ -24,6 +25,8 @@ use std::ptr::NonNull;
 ///
 /// let mut list = List::from_iter([1, 2, 3]);
 /// let mut iter = list.iter();
+///
+/// // Won't compile, because list is already borrowed immutably.
 /// list.push_back(4);
 /// println!("{:?}", iter.next());
 /// ```
@@ -379,6 +382,7 @@ impl<'a, T: 'a> Iterator for CursorBackIterMut<'a, T> {
     }
 }
 
+/// Convert the cursor to an iterator, which is cyclic and not fused.
 impl<'a, T: 'a> IntoIterator for Cursor<'a, T> {
     type Item = &'a T;
     type IntoIter = CursorIter<'a, T>;
@@ -388,6 +392,8 @@ impl<'a, T: 'a> IntoIterator for Cursor<'a, T> {
     }
 }
 
+/// Convert the cursor to an mutable iterator, which is cyclic
+/// and not fused.
 impl<'a, T: 'a> IntoIterator for CursorMut<'a, T> {
     type Item = &'a mut T;
     type IntoIter = CursorIterMut<'a, T>;

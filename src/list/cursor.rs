@@ -4,7 +4,7 @@ use std::fmt;
 use std::fmt::Formatter;
 use std::ptr::NonNull;
 
-/// A cursor over a `List`.
+/// A cursor over a [`List`].
 ///
 /// A `Cursor` is like an iterator, except that it can freely seek back-and-forth.
 ///
@@ -30,8 +30,8 @@ use std::ptr::NonNull;
 /// assert!(cursor.move_next().is_ok());
 /// assert_eq!(cursor.current(), Some(&'B'));
 ///
-/// // Create a cursor in the end: [ A B C D|#] (index = 4)
-/// let mut cursor = list.cursor_end();
+/// // Move the cursor to the end: [ A B C D|#] (index = 4)
+/// cursor.move_to_end();
 /// assert_eq!(cursor.current(), None);
 ///
 /// // Move cursor backward: [ A B C|D #] (index = 3)
@@ -39,8 +39,9 @@ use std::ptr::NonNull;
 /// assert_eq!(cursor.current(), Some(&'D'));
 ///
 /// // Create a cursor in the end and move forward: [ A B C D|#] (index = 4)
-/// let mut cursor = list.cursor_end();
+/// cursor.move_to_end();
 /// assert!(cursor.move_next().is_err());
+///
 /// // Move cursor forward, cyclically: [|A B C D #] (index = 0)
 /// cursor.move_next_cyclic();
 /// assert_eq!(cursor.current(), Some(&'A'));
@@ -118,7 +119,7 @@ impl<'a, T: 'a> PartialOrd for Cursor<'a, T> {
     }
 }
 
-/// A cursor over a `List` with editing operations.
+/// A cursor over a [`List`] with editing operations.
 ///
 /// A `CursorMut` is like an iterator, except that it can freely seek back-and-forth,
 /// and can safely mutate the list during iteration. This is because the lifetime of
@@ -196,6 +197,7 @@ macro_rules! impl_cursor {
             }
         }
 
+        /// Public methods of cursor moving or locating
         impl<'a, T: 'a> $CURSOR<'a, T> {
             #[cfg(feature = "length")]
             /// Return the index of the cursor
@@ -204,12 +206,18 @@ macro_rules! impl_cursor {
             }
 
             /// Returns `true` if the `List` is empty. See [`List::is_empty`].
+            ///
+            /// # Complexity
+            ///
+            /// This operation should compute in *O*(1) time.
             pub fn is_empty(&self) -> bool {
                 self.list.is_empty()
             }
 
             /// Move the cursor to the next position, where passing
             /// through the ghost node is allowed.
+            ///
+            /// # Complexity
             ///
             /// This operation should compute in *O*(*1*) time.
             ///
@@ -245,6 +253,8 @@ macro_rules! impl_cursor {
             /// Move the cursor to the previous position, where passing
             /// through the ghost node is allowed.
             ///
+            /// # Complexity
+            ///
             /// This operation should compute in *O*(*1*) time.
             ///
             /// # Examples
@@ -279,6 +289,8 @@ macro_rules! impl_cursor {
             /// Move the cursor to the next position, or return an error
             /// when passing through the ghost node is happened.
             ///
+            /// # Complexity
+            ///
             /// This operation should compute in *O*(*1*) time.
             ///
             /// # Examples
@@ -309,6 +321,8 @@ macro_rules! impl_cursor {
 
             /// Move the cursor to the previous position, or return an error
             /// when passing through the ghost node is happened.
+            ///
+            /// # Complexity
             ///
             /// This operation should compute in *O*(*1*) time.
             ///
@@ -344,6 +358,8 @@ macro_rules! impl_cursor {
             ///
             /// If an error occurs, the cursor will stay at the ghost node.
             ///
+            /// # Complexity
+            ///
             /// This operation should compute in *O*(*n*) time.
             ///
             /// # Examples
@@ -374,6 +390,8 @@ macro_rules! impl_cursor {
             ///
             /// If an error occurs, the cursor will stay at the first node.
             ///
+            /// # Complexity
+            ///
             /// This operation should compute in *O*(*n*) time.
             ///
             /// # Examples
@@ -402,6 +420,8 @@ macro_rules! impl_cursor {
             /// as an error when `target > len`.
             ///
             /// If an error occurs, the cursor will stay put.
+            ///
+            /// # Complexity
             ///
             /// This operation should compute in *O*(*n*) time.
             ///
@@ -478,6 +498,8 @@ macro_rules! impl_cursor {
 
             /// Move the cursor to the given position `target`.
             ///
+            /// # Complexity
+            ///
             /// This operation should compute in *O*(*n*) time.
             ///
             /// # Panics
@@ -502,6 +524,8 @@ macro_rules! impl_cursor {
             }
 
             /// Set the cursor to the start of the list (i.e. the first node).
+            ///
+            /// # Complexity
             ///
             /// This operation should compute in *O*(*1*) time.
             ///
@@ -531,6 +555,8 @@ macro_rules! impl_cursor {
             }
 
             /// Set the cursor to the end of the list (i.e. the ghost node).
+            ///
+            /// # Complexity
             ///
             /// This operation should compute in *O*(*1*) time.
             ///
@@ -671,7 +697,7 @@ impl<'a, T: 'a> CursorMut<'a, T> {
     }
 }
 
-// Methods that does not change the linking structure of the list.
+/// Methods that does not change the linking structure of the list.
 impl<'a, T: 'a> CursorMut<'a, T> {
     /// Return an mutable reference of current node of the cursor,
     /// or return `None` if it is located at the first node.
@@ -770,6 +796,9 @@ impl<'a, T: 'a> CursorMut<'a, T> {
     /// // Temporarily view the list
     /// assert_eq!(cursor.view().back(), Some(&3));
     ///
+    /// // Won't compile because list is already borrowed mutably.
+    /// // assert_eq!(list.back(), Some(&3));
+    ///
     /// cursor.insert(4);
     /// assert_eq!(Vec::from_iter(list), vec![4, 1, 2, 3]);
     /// ```
@@ -778,7 +807,7 @@ impl<'a, T: 'a> CursorMut<'a, T> {
     }
 }
 
-// Methods that might change the linking structure of the list.
+/// Methods that might change the linking structure of the list.
 impl<'a, T: 'a> CursorMut<'a, T> {
     /// Add an element first in the list.
     ///
@@ -796,10 +825,11 @@ impl<'a, T: 'a> CursorMut<'a, T> {
     /// let mut cursor = list.cursor_end_mut();
     ///
     /// cursor.insert(4);
+    /// cursor.push_front(0);
     /// // Won't compile because list is already mutably borrowed,
     /// // and the cursor is used later.
     /// // list.push_front(0);
-    /// cursor.push_front(0);
+    ///
     /// #[cfg(feature = "length")]
     /// assert_eq!(cursor.index(), 5);
     /// assert_eq!(cursor.previous(), Some(&4));
@@ -832,10 +862,12 @@ impl<'a, T: 'a> CursorMut<'a, T> {
     ///
     /// cursor.insert(4); // becomes [1, 2, 3, 4], points to # (the ghost node)
     /// assert_eq!(cursor.previous(), Some(&4));
+    ///
+    /// assert_eq!(cursor.pop_front(), Some(1)); // becomes [2, 3, 4], points to #
     /// // Won't compile because list is already mutably borrowed,
     /// // and the cursor is used later.
-    /// // list.pop_front();
-    /// assert_eq!(cursor.pop_front(), Some(1)); // becomes [2, 3, 4], points to #
+    /// // assert_eq!(list.pop_front(), Some(1));
+    ///
     /// #[cfg(feature = "length")]
     /// assert_eq!(cursor.index(), 3);
     /// assert_eq!(cursor.previous(), Some(&4));
@@ -874,10 +906,15 @@ impl<'a, T: 'a> CursorMut<'a, T> {
     /// let mut cursor = list.cursor_start_mut();
     ///
     /// cursor.insert(0);
+    ///
+    /// cursor.push_back(4);
     /// // Won't compile because list is already mutably borrowed,
     /// // and the cursor is used later.
     /// // list.push_back(4);
-    /// cursor.push_back(4);
+    ///
+    /// #[cfg(feature = "length")]
+    /// assert_eq!(cursor.index(), 1);
+    /// assert_eq!(cursor.current(), Some(&1));
     ///
     /// assert_eq!(Vec::from_iter(list), vec![0, 1, 2, 3, 4]);
     /// ```
@@ -902,10 +939,15 @@ impl<'a, T: 'a> CursorMut<'a, T> {
     /// let mut cursor = list.cursor_start_mut();
     ///
     /// cursor.insert(0);
+    ///
+    /// assert_eq!(cursor.pop_back(), Some(3));
     /// // Won't compile because list is already mutably borrowed,
     /// // and the cursor is used later.
-    /// // list.push_back();
-    /// assert_eq!(cursor.pop_back(), Some(3));
+    /// // assert_eq!(list.pop_back(), Some(3));
+    ///
+    /// #[cfg(feature = "length")]
+    /// assert_eq!(cursor.index(), 1);
+    /// assert_eq!(cursor.current(), Some(&1));
     ///
     /// assert_eq!(Vec::from_iter(list), vec![0, 1, 2]);
     /// ```
@@ -918,6 +960,8 @@ impl<'a, T: 'a> CursorMut<'a, T> {
     /// After insertion, the cursor stays put but its `index` becomes
     /// `index + 1`.
     ///
+    /// # Complexity
+    ///
     /// This operation should compute in *O*(1) time.
     ///
     /// # Examples
@@ -929,7 +973,6 @@ impl<'a, T: 'a> CursorMut<'a, T> {
     /// let mut list = List::from_iter([1, 2, 3]);
     /// let mut cursor = list.cursor_mut(1);
     ///
-    /// // insert at the
     /// cursor.insert(4); // becomes [1, 4, 2, 3]
     /// #[cfg(feature = "length")]
     /// assert_eq!(cursor.index(), 2);
@@ -940,7 +983,6 @@ impl<'a, T: 'a> CursorMut<'a, T> {
     /// #[cfg(feature = "length")]
     /// assert_eq!(cursor.index(), 5);
     /// assert_eq!(cursor.previous(), Some(&5));
-    ///
     ///
     /// assert_eq!(Vec::from_iter(list), vec![1, 4, 2, 3, 5]);
     /// ```
@@ -956,6 +998,8 @@ impl<'a, T: 'a> CursorMut<'a, T> {
     /// Remove the element at the cursor and return it, or return `None`
     /// if the cursor is at the ghost node. After removal, the cursor
     /// is moved to the next node unless no removing is happened.
+    ///
+    /// # Complexity
     ///
     /// This operation should compute in *O*(*1*) time.
     ///
@@ -980,7 +1024,7 @@ impl<'a, T: 'a> CursorMut<'a, T> {
     /// assert_eq!(cursor.current(), Some(&1));
     ///
     /// cursor.move_to_end();
-    /// assert_eq!(cursor.remove(), None);
+    /// assert_eq!(cursor.remove(), None); // removing at the ghost node returns `None`
     /// #[cfg(feature = "length")]
     /// assert_eq!(cursor.index(), 8);
     /// assert_eq!(cursor.current(), None);
@@ -1001,6 +1045,8 @@ impl<'a, T: 'a> CursorMut<'a, T> {
     /// the cursor is at the first node. After removal, the cursor is not moved,
     /// but its `index` becomes `index - 1`.
     ///
+    /// # Complexity
+    ///
     /// This operation should compute in *O*(*1*) time.
     ///
     /// # Examples
@@ -1018,7 +1064,7 @@ impl<'a, T: 'a> CursorMut<'a, T> {
     /// assert_eq!(cursor.current(), Some(&5));
     ///
     /// cursor.move_to_start();
-    /// assert_eq!(cursor.backspace(), None);
+    /// assert_eq!(cursor.backspace(), None); // backspacing at the first node returns `None`
     /// #[cfg(feature = "length")]
     /// assert_eq!(cursor.index(), 0);
     /// assert_eq!(cursor.current(), Some(&0));
@@ -1041,6 +1087,8 @@ impl<'a, T: 'a> CursorMut<'a, T> {
     ///
     /// If the cursor is pointing at the ghost node, `None` will be returned.
     ///
+    /// # Complexity
+    ///
     /// This operation should compute in *O*(*1*) time.
     ///
     /// # Examples
@@ -1052,6 +1100,8 @@ impl<'a, T: 'a> CursorMut<'a, T> {
     /// let mut list = List::from_iter(0..10);
     /// let mut cursor = list.cursor_mut(5);
     ///
+    /// // Split the list at cursor position (index = 5), and leave
+    /// // all the nodes before cursor (exclusive).
     /// let list2 = cursor.split().unwrap();
     /// assert_eq!(cursor.current(), None);
     /// #[cfg(feature = "length")]
@@ -1086,6 +1136,8 @@ impl<'a, T: 'a> CursorMut<'a, T> {
     ///
     /// If the cursor is pointing at the front node, `None` will be returned.
     ///
+    /// # Complexity
+    ///
     /// This operation should compute in *O*(*1*) time.
     ///
     /// # Examples
@@ -1097,6 +1149,8 @@ impl<'a, T: 'a> CursorMut<'a, T> {
     /// let mut list = List::from_iter(0..10);
     /// let mut cursor = list.cursor_mut(5);
     ///
+    /// // Split the list at cursor position (index = 5), and leave
+    /// // all the nodes after cursor (inclusive).
     /// let list2 = cursor.split_before().unwrap();
     /// assert_eq!(cursor.current(), Some(&5));
     /// #[cfg(feature = "length")]
@@ -1127,6 +1181,8 @@ impl<'a, T: 'a> CursorMut<'a, T> {
 
     /// Splice another list between the current node and its previous node.
     ///
+    /// # Complexity
+    ///
     /// This operation should compute in *O*(*1*) time.
     ///
     /// # Examples
@@ -1139,6 +1195,7 @@ impl<'a, T: 'a> CursorMut<'a, T> {
     /// let list2 = List::from_iter([2, 3, 4, 5, 6]);
     /// let mut cursor = list.cursor_mut(2);
     ///
+    /// // Splice another list at the cursor position.
     /// cursor.splice(list2);
     /// assert_eq!(cursor.current(), Some(&7));
     /// #[cfg(feature = "length")]
@@ -1187,6 +1244,9 @@ impl<'a, T: 'a> CursorMut<'a, T> {
 /// let mut cursor = cursor_iter.into_cursor();
 /// assert_eq!(cursor.current(), Some(&2));
 /// ```
+///
+/// [`Iter`]: crate::list::iterator::Iter
+/// [`IterMut`]: crate::list::iterator::IterMut
 pub struct CursorIter<'a, T: 'a> {
     pub(crate) cursor: Cursor<'a, T>,
 }
@@ -1217,6 +1277,9 @@ pub struct CursorIter<'a, T: 'a> {
 /// let mut cursor = cursor_iter.into_cursor_mut();
 /// assert_eq!(cursor.current(), Some(&15));
 /// ```
+///
+/// [`Iter`]: crate::list::iterator::Iter
+/// [`IterMut`]: crate::list::iterator::IterMut
 pub struct CursorIterMut<'a, T: 'a> {
     pub(crate) cursor: CursorMut<'a, T>,
 }
@@ -1275,62 +1338,85 @@ pub struct CursorBackIterMut<'a, T: 'a> {
 }
 
 impl<'a, T: 'a> CursorIter<'a, T> {
+    /// Convert the cursor iterator to a cursor.
     pub fn into_cursor(self) -> Cursor<'a, T> {
         self.cursor
     }
+    /// Make a back iterator which reverses the iterating direction.
     pub fn rev(self) -> CursorBackIter<'a, T> {
         CursorBackIter {
             cursor: self.cursor,
         }
     }
+    /// Peek the next item being iterated without consume it.
     pub fn peek(&self) -> Option<&'a T> {
         self.cursor.current()
     }
 }
 
 impl<'a, T: 'a> CursorIterMut<'a, T> {
+    /// Convert the mutable cursor iterator to an immutable cursor
     pub fn into_cursor(self) -> Cursor<'a, T> {
         self.cursor.into_cursor()
     }
+    /// Convert the mutable cursor iterator to a mutable cursor.
     pub fn into_cursor_mut(self) -> CursorMut<'a, T> {
         self.cursor
     }
+    /// Make a mutable cursor back iterator which reverses the
+    /// iterating direction.
     pub fn rev(self) -> CursorBackIterMut<'a, T> {
         CursorBackIterMut {
             cursor: self.cursor,
         }
     }
+    /// Peek the next item being iterated (mutably) without consume it.
     pub fn peek(&mut self) -> Option<&'a mut T> {
         self.cursor.current_mut()
     }
 }
 
 impl<'a, T: 'a> CursorBackIter<'a, T> {
+    /// Convert the cursor back iterator to a cursor.
     pub fn into_cursor(self) -> Cursor<'a, T> {
         self.cursor
     }
+    /// Make a normal cursor iterator which recovers the
+    /// original iterating direction.
     pub fn rev(self) -> CursorIter<'a, T> {
         CursorIter {
             cursor: self.cursor,
         }
     }
+    /// Peek the next item being iterated without consume it.
+    ///
+    /// Note that the iterating direction is opposite to the
+    /// normal cursor iterator.
     pub fn peek(&self) -> Option<&'a T> {
         self.cursor.previous()
     }
 }
 
 impl<'a, T: 'a> CursorBackIterMut<'a, T> {
+    /// Convert the mutable cursor back iterator to an immutable cursor.
     pub fn into_cursor(self) -> Cursor<'a, T> {
         self.cursor.into_cursor()
     }
+    /// Convert the mutable cursor back iterator to a mutable cursor.
     pub fn into_cursor_mut(self) -> CursorMut<'a, T> {
         self.cursor
     }
+    /// Make a normal mutable cursor iterator which recovers the
+    /// original iterating direction.
     pub fn rev(self) -> CursorIterMut<'a, T> {
         CursorIterMut {
             cursor: self.cursor,
         }
     }
+    /// Peek the next item being iterated (mutably) without consume it.
+    ///
+    /// Note that the iterating direction is opposite to the
+    /// normal cursor iterator.
     pub fn peek(&mut self) -> Option<&'a mut T> {
         self.cursor.previous_mut()
     }
