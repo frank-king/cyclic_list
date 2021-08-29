@@ -43,7 +43,6 @@ impl<'a, T: 'a> Iter<'a, T> {
         let _marker = PhantomData;
         #[cfg(feature = "length")]
         let len = list.len();
-        eprintln!("len: {}", len);
         Self {
             start,
             end,

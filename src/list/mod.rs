@@ -200,7 +200,6 @@ impl<T> List<T> {
     /// when construction.
     pub(crate) fn from_detached(detached: DetachedNodes<T>) -> Self {
         let mut list = List::new();
-        // TODO: SAFETY
         unsafe {
             list.attach_nodes(list.ghost_node(), list.ghost_node(), detached);
         }
@@ -306,7 +305,7 @@ impl<T> List<T> {
     /// ```
     #[inline]
     pub fn clear(&mut self) {
-        while let Some(_) = self.pop_front() {}
+        while self.pop_front().is_some() {}
     }
 
     /// Provides a reference to the front element, or `None` if the list is
@@ -502,10 +501,15 @@ impl<T> List<T> {
     /// assert_eq!(list.cursor(3).current(), None);
     /// ```
     pub fn cursor(&self, at: usize) -> Cursor<'_, T> {
+        #[cfg(feature = "length")]
+        assert!(
+            at <= self.len,
+            "Cannot create cursor at a nonexistent index"
+        );
         let mut cursor = self.cursor_start();
         cursor
-            .seek_to(at)
-            .expect("Cannot create cursor at unexpected place");
+            .try_seek_to(at)
+            .expect("Cannot create cursor at a nonexistent index");
         cursor
     }
 
@@ -578,10 +582,16 @@ impl<T> List<T> {
     /// assert_eq!(list.cursor_mut(3).current_mut(), None);
     /// ```
     pub fn cursor_mut(&mut self, at: usize) -> CursorMut<'_, T> {
+        #[cfg(feature = "length")]
+        assert!(
+            at <= self.len,
+            "Cannot create cursor at a nonexistent index"
+        );
+
         let mut cursor = self.cursor_start_mut();
         cursor
-            .seek_to(at)
-            .expect("Cannot create cursor at unexpected place");
+            .try_seek_to(at)
+            .expect("Cannot create cursor at a nonexistent index");
         cursor
     }
 
@@ -720,7 +730,8 @@ impl<T> List<T> {
     /// ```
     pub fn append(&mut self, other: &mut Self) {
         if let Some(detached) = other.detach_all_nodes() {
-            // TODO: SAFETY
+            // `self.back_node()` and `self.ghost_node()` are valid
+            // nodes in the list and they are adjacent, so it is safe.
             unsafe { self.attach_nodes(self.back_node(), self.ghost_node(), detached) }
         }
     }
@@ -755,17 +766,19 @@ impl<T> List<T> {
     /// ```
     pub fn prepend(&mut self, other: &mut Self) {
         if let Some(detached) = other.detach_all_nodes() {
-            // TODO: SAFETY
+            // `self.ghost_node()` and `self.front_node()` are valid
+            // nodes in the list and they are adjacent, so it is safe.
             unsafe { self.attach_nodes(self.ghost_node(), self.front_node(), detached) }
         }
     }
 
-    /// Splits the list into two at the given index. Returns everything after the given index,
-    /// including the index; or `None` if `at == len`.
+    /// Splits the list into two at the given index. Returns everything after
+    /// the given index (inclusive).
     ///
     /// This operation should compute in *O*(*n*) time.
     ///
     /// # Panics
+    ///
     /// Panics if `at > len`
     ///
     /// # Examples
@@ -779,19 +792,19 @@ impl<T> List<T> {
     /// list.push_front(2);
     /// list.push_front(3);
     ///
-    /// let mut split = list.split_off(2).unwrap();
+    /// let mut split = list.split_off(2);
     ///
     /// assert_eq!(split.pop_front(), Some(1));
     /// assert_eq!(split.pop_front(), None);
     /// ```
-    pub fn split_off(&mut self, at: usize) -> Option<List<T>> {
+    pub fn split_off(&mut self, at: usize) -> List<T> {
         #[cfg(feature = "length")]
         assert!(at <= self.len, "Cannot split off at a nonexistent index");
         #[cfg(feature = "length")]
         if at == self.len {
-            return None;
+            return List::new();
         }
-        self.cursor_mut(at).split()
+        self.cursor_mut(at).split().unwrap_or_default()
     }
 
     /// Removes the element at the given index and returns it.
@@ -799,6 +812,7 @@ impl<T> List<T> {
     /// This operation should compute in *O*(*n*) time.
     ///
     /// # Panics
+    ///
     /// Panics if `at >= len`
     ///
     /// # Examples
@@ -828,11 +842,43 @@ impl<T> List<T> {
             .expect("Cannot remove at an index outside of the list bounds")
     }
 
+    /// Adds an element at the given index in the list.
+    ///
+    /// This operation should compute in *O*(*n*) time.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `at >= len`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cyclic_list::List;
+    /// use std::iter::FromIterator;
+    ///
+    /// let mut list = List::from_iter([1, 2, 3]);
+    ///
+    /// list.insert(2, 4);
+    /// list.insert(4, 5);
+    ///
+    /// assert_eq!(Vec::from_iter(list), vec![1, 2, 4, 3, 5]);
+    /// ```
+    pub fn insert(&mut self, at: usize, elm: T) {
+        #[cfg(feature = "length")]
+        assert!(
+            at <= self.len,
+            "Cannot insert at an index outside of the list bounds"
+        );
+
+        self.cursor_mut(at).insert(elm);
+    }
+
     /// Splices another list at the given index.
     ///
     /// This operation should compute in *O*(*n*) time.
     ///
     /// # Panics
+    ///
     /// Panics if `at > len`
     ///
     /// # Examples
@@ -880,15 +926,13 @@ impl<T> Node<T> {
         // - `node.prev` and `node.next` is dangling, but need unsafe blocks for dereference,
         //   so it is also safe.
         NonNull::from(unsafe {
-            #[allow(invalid_value)]
+            // `node.prev` and `node.next` will not be read, so it is ok to be
+            // uninitialized. `node.element` is initialized manually by `ptr::write`.
+            #[allow(invalid_value, clippy::uninit_assumed_init)]
             let node = Box::<Node<T>>::leak(Box::new(MaybeUninit::uninit().assume_init()));
             std::ptr::write(&mut node.element, element);
             node
         })
-    }
-
-    pub(crate) fn into_element(self: Box<Self>) -> T {
-        self.element
     }
 }
 
@@ -957,9 +1001,10 @@ fn assert_covariance() {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-
     use crate::list::List;
+    use std::cell::RefCell;
+    use std::fmt::Debug;
+    use std::iter::FromIterator;
 
     #[test]
     fn list_create() {
@@ -989,11 +1034,208 @@ mod tests {
             }
         }
         let dropped = RefCell::new(Vec::<i32>::new());
-        let mut list = List::<DropChecker<i32>>::new();
+        let mut list = List::new();
         list.push_back(DropChecker::new(1, &dropped));
         list.push_back(DropChecker::new(2, &dropped));
         list.push_back(DropChecker::new(3, &dropped));
         drop(list);
         assert_eq!(dropped.borrow().as_slice(), &[1, 2, 3]);
+    }
+
+    #[test]
+    fn list_push_and_pop() {
+        let mut list = List::new();
+        assert!(list.is_empty());
+        #[cfg(feature = "length")]
+        assert_eq!(list.len(), 0);
+
+        assert_eq!(list.front(), None);
+        assert_eq!(list.back(), None);
+        assert_eq!(list.pop_front(), None);
+        assert_eq!(list.pop_back(), None);
+
+        list.push_back(1);
+        assert_eq!(list.back(), Some(&1));
+        assert_eq!(list.pop_front(), Some(1));
+        assert_eq!(list.pop_back(), None);
+        assert!(list.is_empty());
+        #[cfg(feature = "length")]
+        assert_eq!(list.len(), 0);
+
+        list.push_front(1);
+        list.push_front(2);
+        list.push_back(3);
+        assert_eq!(list.back(), Some(&3));
+        assert_eq!(list.front(), Some(&2));
+        assert_eq!(list.pop_front(), Some(2));
+        assert_eq!(list.pop_back(), Some(3));
+
+        assert_eq!(list.front(), Some(&1));
+        assert_eq!(list.pop_front(), Some(1));
+        assert_eq!(list.front(), None);
+        assert_eq!(list.back(), None);
+        assert!(list.is_empty());
+        #[cfg(feature = "length")]
+        assert_eq!(list.len(), 0);
+    }
+
+    #[test]
+    fn list_insert_and_remove() {
+        fn list_eq<T, I>(list: &List<T>, expected: I)
+        where
+            T: Debug + Clone + Eq,
+            I: IntoIterator<Item = T>,
+        {
+            assert_eq!(
+                Vec::from_iter(list.iter().cloned()),
+                Vec::from_iter(expected)
+            );
+        }
+
+        let mut list = List::from_iter(0..10);
+        list.insert(5, 10);
+        list_eq(&list, (0..5).chain(Some(10)).chain(5..10));
+
+        assert_eq!(list.remove(10), 9);
+        assert_eq!(list.back(), Some(&8));
+        list_eq(&list, (0..5).chain(Some(10)).chain(5..9));
+
+        list.insert(0, 11);
+        assert_eq!(list.front(), Some(&11));
+        list_eq(&list, (11..=11).chain((0..5).chain(Some(10)).chain(5..9)));
+
+        assert_eq!(list.remove(0), 11);
+        assert_eq!(list.front(), Some(&0));
+        list_eq(&list, (0..5).chain(Some(10)).chain(5..9));
+
+        list.insert(10, 12);
+        assert_eq!(list.back(), Some(&12));
+        list_eq(&list, (0..5).chain(Some(10)).chain(5..9).chain(Some(12)));
+    }
+
+    #[test]
+    fn list_split_and_append() {
+        fn test_list_split_and_append_and_prepend<T, I1, I2, I3>(
+            list: I1,
+            other: I2,
+            at: usize,
+            appended: I3,
+        ) where
+            T: Clone + Eq + Debug,
+            I1: IntoIterator<Item = T>,
+            I2: IntoIterator<Item = T>,
+            I3: IntoIterator<Item = T>,
+        {
+            // Construct the lists with iterators.
+            let mut list = List::from_iter(list);
+            let other = List::from_iter(other);
+            let appended = List::from_iter(appended);
+
+            let cloned = list.clone();
+            let mut other_cloned = other.clone();
+
+            // Test append
+            list.append(&mut other_cloned);
+            assert!(other_cloned.is_empty());
+            assert_eq!(list, appended);
+            #[cfg(feature = "length")]
+            assert_eq!(list.len(), cloned.len() + other.len());
+
+            // Test split
+            let split = list.split_off(at);
+            assert_eq!(list, cloned);
+            assert_eq!(split, other.clone());
+            #[cfg(feature = "length")]
+            assert_eq!(list.len(), cloned.len());
+
+            let (mut list, other) = (other, list);
+            let cloned = list.clone();
+            let mut other_cloned = other.clone();
+
+            // Test prepend
+            list.prepend(&mut other_cloned);
+            assert!(other_cloned.is_empty());
+            assert_eq!(list, appended);
+            #[cfg(feature = "length")]
+            assert_eq!(list.len(), cloned.len() + other.len());
+
+            let split = list.split_off(at);
+            assert_eq!(list, other);
+            assert_eq!(split, cloned);
+        }
+        test_list_split_and_append_and_prepend(0..5, 5..7, 5, 0..7);
+        test_list_split_and_append_and_prepend(0..5, None, 5, 0..5);
+        test_list_split_and_append_and_prepend(0..5, 5..6, 5, 0..6);
+        test_list_split_and_append_and_prepend(0..1, 1..3, 1, 0..3);
+        test_list_split_and_append_and_prepend(0..1, None, 1, 0..1);
+        test_list_split_and_append_and_prepend(0..1, 1..2, 1, 0..2);
+        test_list_split_and_append_and_prepend(None, 0..2, 0, 0..2);
+        test_list_split_and_append_and_prepend::<i32, _, _, _>(None, None, 0, None);
+        test_list_split_and_append_and_prepend(None, 0..1, 0, 0..1);
+    }
+
+    #[test]
+    fn list_splice() {
+        fn test_list_splice<T, I1, I2, I3>(list: I1, other: I2, at: usize, spliced: I3)
+        where
+            T: Clone + Eq + Debug,
+            I1: IntoIterator<Item = T>,
+            I2: IntoIterator<Item = T>,
+            I3: IntoIterator<Item = T>,
+        {
+            let mut list = List::from_iter(list);
+            let other = List::from_iter(other);
+            let spliced = List::from_iter(spliced);
+
+            let cloned = list.clone();
+            list.splice_at(at, other.clone());
+            assert_eq!(list, spliced);
+            #[cfg(feature = "length")]
+            assert_eq!(list.len(), cloned.len() + other.len());
+        }
+        test_list_splice(0..5, 5..7, 5, 0..7);
+        test_list_splice(0..5, 5..7, 2, (0..2).chain(5..7).chain(2..5));
+        test_list_splice(0..5, 5..7, 0, (5..7).chain(0..5));
+        test_list_splice(0..5, Some(5), 5, 0..6);
+        test_list_splice(0..5, Some(5), 2, (0..2).chain(Some(5)).chain(2..5));
+        test_list_splice(0..5, Some(5), 0, Some(5).into_iter().chain(0..5));
+        test_list_splice(Some(0), 1..3, 1, 0..3);
+        test_list_splice(Some(0), 1..3, 0, (1..3).chain(Some(0)));
+        test_list_splice(None, 0..2, 0, 0..2);
+        test_list_splice(None, Some(0), 0, Some(0));
+        test_list_splice::<i32, _, _, _>(None, None, 0, None);
+    }
+
+    #[cfg(feature = "length")]
+    #[test]
+    fn list_len() {
+        let mut list = List::new();
+        assert!(list.is_empty());
+        assert_eq!(list.len(), 0);
+
+        list.push_back(1);
+        assert_eq!(list.len(), 1);
+
+        list.pop_front();
+        assert_eq!(list.len(), 0);
+
+        list.append(&mut List::from_iter(0..5));
+        assert_eq!(list.len(), 5);
+
+        list.remove(3);
+        assert_eq!(list.len(), 4);
+
+        list.splice_at(3, List::from_iter(5..7));
+        assert_eq!(list.len(), 6);
+
+        let other = list.split_off(4);
+        assert_eq!(list.len(), 4);
+        assert_eq!(other.len(), 2);
+
+        list.prepend(&mut List::from_iter(7..10));
+        assert_eq!(list.len(), 7);
+
+        list.clear();
+        assert_eq!(list.len(), 0);
     }
 }

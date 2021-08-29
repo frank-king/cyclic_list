@@ -339,7 +339,8 @@ macro_rules! impl_cursor {
             }
 
             /// Move forward the cursor by given steps, or return an error
-            /// when passing through the ghost node is happened.
+            /// which tells the actual steps it has moved, when passing through
+            /// the ghost node is happened.
             ///
             /// If an error occurs, the cursor will stay at the ghost node.
             ///
@@ -358,7 +359,7 @@ macro_rules! impl_cursor {
             /// assert_eq!(cursor.current(), Some(&1));
             ///
             /// // Forbid to move passing through the ghost node
-            /// assert!(cursor.seek_forward(5).is_err());
+            /// assert_eq!(cursor.seek_forward(5), Err(3));
             ///
             /// // the cursor is now at the ghost node
             /// assert_eq!(cursor.previous(), Some(&3));
@@ -368,7 +369,8 @@ macro_rules! impl_cursor {
             }
 
             /// Move backward the cursor by given steps, or return an error
-            /// when passing through the ghost node is happened.
+            /// which tells the actual steps it has moved, when passing through
+            /// the ghost node is happened.
             ///
             /// If an error occurs, the cursor will stay at the first node.
             ///
@@ -387,7 +389,7 @@ macro_rules! impl_cursor {
             /// assert_eq!(cursor.previous(), Some(&3));
             ///
             /// // Forbid to move passing through the ghost node
-            /// assert!(cursor.seek_backward(5).is_err());
+            /// assert_eq!(cursor.seek_backward(5), Err(3));
             ///
             /// // the cursor is now at the ghost node
             /// assert_eq!(cursor.current(), Some(&1));
@@ -396,8 +398,8 @@ macro_rules! impl_cursor {
                 (0..steps).try_for_each(|i| self.move_prev().map_err(|_| i))
             }
 
-            /// Move the cursor to the given position `target`, or return an error
-            /// when `target > len`.
+            /// Move the cursor to the given position `target`, or return the `target`
+            /// as an error when `target > len`.
             ///
             /// If an error occurs, the cursor will stay put.
             ///
@@ -416,22 +418,23 @@ macro_rules! impl_cursor {
             /// assert_eq!(cursor.current(), Some(&1));
             ///
             /// // Move cursor to a valid place (at the third node)
-            /// assert!(cursor.seek_to(2).is_ok());
+            /// assert!(cursor.try_seek_to(2).is_ok());
             /// assert_eq!(cursor.current(), Some(&3));
             ///
             /// // Forbid to move to a invalid place
-            /// assert!(cursor.seek_to(5).is_err());
+            /// assert_eq!(cursor.try_seek_to(5), Err(5));
             ///
             /// // The cursor is still at the third node
             /// assert_eq!(cursor.current(), Some(&3));
             /// ```
-            pub fn seek_to(&mut self, target: usize) -> Result<(), usize> {
+            pub fn try_seek_to(&mut self, target: usize) -> Result<(), usize> {
                 #[cfg(not(feature = "length"))]
                 {
                     let current = self.current;
                     self.move_to_start();
                     if self.seek_forward(target).is_err() {
                         self.current = current;
+                        return Err(target);
                     }
                 }
                 #[cfg(feature = "length")]
@@ -441,7 +444,7 @@ macro_rules! impl_cursor {
                     }
                     let len = self.list.len();
                     match target {
-                        target if target > len => return Err(target - len),
+                        target if target > len => return Err(target),
                         0 => self.move_to_start(),
                         target if target == len => self.move_to_end(),
                         _ => unsafe {
@@ -471,6 +474,31 @@ macro_rules! impl_cursor {
                     }
                 }
                 Ok(())
+            }
+
+            /// Move the cursor to the given position `target`.
+            ///
+            /// This operation should compute in *O*(*n*) time.
+            ///
+            /// # Panics
+            ///
+            /// Panics if `target > len`.
+            ///
+            /// # Examples
+            ///
+            /// ```should_panic
+            /// use cyclic_list::List;
+            /// use std::iter::FromIterator;
+            ///
+            /// let list = List::from_iter([1, 2, 3]);
+            /// let mut cursor = list.cursor_start();
+            ///
+            /// // Panics if moving to a invalid place
+            /// cursor.seek_to(5);
+            /// ```
+            pub fn seek_to(&mut self, target: usize) {
+                self.try_seek_to(target)
+                    .expect("Cannot seek to nonexistent place");
             }
 
             /// Set the cursor to the start of the list (i.e. the first node).
@@ -614,7 +642,7 @@ impl<'a, T: 'a> Cursor<'a, T> {
     }
 
     fn same_list_with(&self, other: &Self) -> bool {
-        self.list as *const _ == other.list as *const _
+        std::ptr::eq(self.list, other.list)
     }
 }
 
@@ -810,7 +838,6 @@ impl<'a, T: 'a> CursorMut<'a, T> {
     /// assert_eq!(cursor.pop_front(), Some(1)); // becomes [2, 3, 4], points to #
     /// #[cfg(feature = "length")]
     /// assert_eq!(cursor.index(), 3);
-    /// eprintln!("{:?}", cursor);
     /// assert_eq!(cursor.previous(), Some(&4));
     ///
     /// assert_eq!(Vec::from_iter(list), vec![2, 3, 4]);
@@ -967,7 +994,7 @@ impl<'a, T: 'a> CursorMut<'a, T> {
         // SAFETY: `self.current` is a valid non-ghost node in the list, so it is safe.
         let node = unsafe { self.list.detach_node(self.current) };
         self.current = self.next_node();
-        Some(Node::into_element(node))
+        Some(node.element)
     }
 
     /// Remove the element before the cursor and return it, or return `None` if
