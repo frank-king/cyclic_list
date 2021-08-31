@@ -76,6 +76,15 @@ impl<T> List<T> {
         NonNull::from(unsafe { self.ghost_node().as_ref().prev.as_ref() }).cast()
     }
 
+    pub(crate) unsafe fn connect(
+        &mut self,
+        mut prev: NonNull<Node<T>>,
+        mut next: NonNull<Node<T>>,
+    ) {
+        prev.as_mut().next = next;
+        next.as_mut().prev = prev;
+    }
+
     /// Detach a single node `node` from the list, and return it as a box.
     ///
     /// It is unsafe because it does not check whether `node` belongs to the list.
@@ -88,9 +97,7 @@ impl<T> List<T> {
             self.len -= 1;
         }
         let node = Box::from_raw(node.as_ptr());
-        let (mut prev, mut next) = (node.prev, node.next);
-        prev.as_mut().next = next;
-        next.as_mut().prev = prev;
+        self.connect(node.prev, node.next);
         node
     }
 
@@ -104,16 +111,14 @@ impl<T> List<T> {
     /// adjacent nodes, this function call will make the list ill-formed.
     pub(crate) unsafe fn attach_node(
         &mut self,
-        mut prev: NonNull<Node<T>>,
-        mut next: NonNull<Node<T>>,
-        mut node: NonNull<Node<T>>,
+        prev: NonNull<Node<T>>,
+        next: NonNull<Node<T>>,
+        node: NonNull<Node<T>>,
     ) {
         #[cfg(debug_assertions)]
         assert_adjacent(prev, next);
-        prev.as_mut().next = node;
-        next.as_mut().prev = node;
-        node.as_mut().prev = prev;
-        node.as_mut().next = next;
+        self.connect(prev, node);
+        self.connect(node, next);
         #[cfg(feature = "length")]
         {
             self.len += 1;
@@ -144,9 +149,7 @@ impl<T> List<T> {
         {
             self.len -= len;
         }
-        let (mut prev, mut next) = (front.as_ref().prev, back.as_ref().next);
-        prev.as_mut().next = next;
-        next.as_mut().prev = prev;
+        self.connect(front.as_ref().prev, back.as_ref().next);
         DetachedNodes::new(
             front,
             back,
@@ -165,16 +168,14 @@ impl<T> List<T> {
     /// adjacent nodes, this function call will make the list ill-formed.
     pub(crate) unsafe fn attach_nodes(
         &mut self,
-        mut prev: NonNull<Node<T>>,
-        mut next: NonNull<Node<T>>,
-        mut detached: DetachedNodes<T>,
+        prev: NonNull<Node<T>>,
+        next: NonNull<Node<T>>,
+        detached: DetachedNodes<T>,
     ) {
         #[cfg(debug_assertions)]
         assert_adjacent(prev, next);
-        prev.as_mut().next = detached.front;
-        next.as_mut().prev = detached.back;
-        detached.front.as_mut().prev = prev;
-        detached.back.as_mut().next = next;
+        self.connect(prev, detached.front);
+        self.connect(detached.back, next);
         #[cfg(feature = "length")]
         {
             self.len += detached.len;

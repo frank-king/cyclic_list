@@ -1,6 +1,7 @@
-use crate::list::List;
+use crate::list::{List, Node};
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
+use std::ptr::NonNull;
 
 impl<T: PartialEq> PartialEq for List<T> {
     fn eq(&self, other: &Self) -> bool {
@@ -55,6 +56,80 @@ impl<T: Hash> Hash for List<T> {
 }
 
 impl<T> List<T> {
+    unsafe fn mid_of_range(
+        &self,
+        mut start: NonNull<Node<T>>,
+        end: NonNull<Node<T>>,
+    ) -> NonNull<Node<T>> {
+        let mut mid = start;
+        while start != end {
+            start = start.as_ref().next;
+            if start != end {
+                start = start.as_ref().next;
+                mid = mid.as_ref().next;
+            }
+        }
+        mid
+    }
+
+    unsafe fn sort_range<F>(
+        &mut self,
+        mut start: NonNull<Node<T>>,
+        end: NonNull<Node<T>>,
+        compare: &mut F,
+    ) -> NonNull<Node<T>>
+    where
+        F: FnMut(&T, &T) -> Ordering,
+    {
+        let mut mid = self.mid_of_range(start, end);
+
+        if start != mid && start.as_ref().next != mid {
+            start = self.sort_range(start, mid, compare);
+        }
+        if mid != end && mid.as_ref().next != end {
+            mid = self.sort_range(mid, end, compare);
+        }
+
+        if start != mid && mid != end {
+            self.merge_range(&mut start, mid, end, compare);
+        }
+        start
+    }
+
+    unsafe fn merge_range<F>(
+        &mut self,
+        start: &mut NonNull<Node<T>>,
+        mid: NonNull<Node<T>>,
+        end: NonNull<Node<T>>,
+        compare: &mut F,
+    ) where
+        F: FnMut(&T, &T) -> Ordering,
+    {
+        let (before_start, before_mid, before_end) =
+            (start.as_ref().prev, mid.as_ref().prev, end.as_ref().prev);
+        let (mut first, mut second, mut result) = (*start, mid, before_start);
+        while first != mid && second != end {
+            let this = match compare(&first.as_ref().element, &second.as_ref().element) {
+                std::cmp::Ordering::Greater => &mut second,
+                _ => &mut first,
+            };
+            self.connect(result, *this);
+            result = std::mem::replace(this, this.as_ref().next);
+        }
+        if let Some((rem_front, rem_back)) = match (first != mid, second != end) {
+            (true, false) => Some((first, before_mid)),
+            (false, true) => Some((second, before_end)),
+            _ => None,
+        } {
+            self.connect(result, rem_front);
+            result = rem_back;
+        };
+        self.connect(result, end);
+        *start = before_start.as_ref().next;
+    }
+}
+
+impl<T> List<T> {
     /// Returns `true` if the `List` contains an element equal to the given value.
     ///
     /// # Examples
@@ -78,28 +153,42 @@ impl<T> List<T> {
         self.iter().any(|e| e == x)
     }
 
-    /// TODO
+    /// ```
+    /// use cyclic_list::List;
+    /// use std::iter::FromIterator;
+    /// let mut list = List::from_iter([5, 2, 4, 3, 1]);
+    ///
+    /// list.sort();
+    ///
+    /// assert_eq!(Vec::from_iter(list), Vec::from_iter([1, 2, 3, 4, 5]));
+    /// List::<i32>::new().sort();
+    /// ```
     pub fn sort(&mut self)
     where
         T: Ord,
     {
-        unimplemented!()
+        self.sort_by(T::cmp);
     }
 
     /// TODO
-    pub fn sort_by<F>(&mut self, _compare: F)
+    pub fn sort_by<F>(&mut self, mut compare: F)
     where
         F: FnMut(&T, &T) -> Ordering,
     {
-        unimplemented!()
+        if self.is_empty() || self.front_node() == self.back_node() {
+            return;
+        }
+        unsafe {
+            self.sort_range(self.front_node(), self.ghost_node(), &mut compare);
+        }
     }
 
     /// TODO
-    pub fn sort_by_key<K, F>(&mut self, _f: F)
+    pub fn sort_by_key<K, F>(&mut self, mut f: F)
     where
         F: FnMut(&T) -> K,
         K: Ord,
     {
-        unimplemented!()
+        self.sort_by(|lhs, rhs| f(lhs).cmp(&f(rhs)));
     }
 }
