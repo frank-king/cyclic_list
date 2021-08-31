@@ -72,46 +72,60 @@ impl<T> List<T> {
         mid
     }
 
+    fn merge_sort<F>(&mut self, mut less: F)
+    where
+        F: FnMut(&T, &T) -> bool,
+    {
+        if self.is_empty() || self.front_node() == self.back_node() {
+            return;
+        }
+        unsafe {
+            self.sort_range(self.front_node(), self.ghost_node(), &mut less);
+        }
+    }
+
     unsafe fn sort_range<F>(
         &mut self,
         mut start: NonNull<Node<T>>,
         end: NonNull<Node<T>>,
-        compare: &mut F,
+        less: &mut F,
     ) -> NonNull<Node<T>>
     where
-        F: FnMut(&T, &T) -> Ordering,
+        F: FnMut(&T, &T) -> bool,
     {
         let mut mid = self.mid_of_range(start, end);
 
         if start != mid && start.as_ref().next != mid {
-            start = self.sort_range(start, mid, compare);
+            start = self.sort_range(start, mid, less);
         }
         if mid != end && mid.as_ref().next != end {
-            mid = self.sort_range(mid, end, compare);
+            mid = self.sort_range(mid, end, less);
         }
 
         if start != mid && mid != end {
-            self.merge_range(&mut start, mid, end, compare);
+            start = self.merge_range(start, mid, end, less);
         }
         start
     }
 
     unsafe fn merge_range<F>(
         &mut self,
-        start: &mut NonNull<Node<T>>,
+        start: NonNull<Node<T>>,
         mid: NonNull<Node<T>>,
         end: NonNull<Node<T>>,
-        compare: &mut F,
-    ) where
-        F: FnMut(&T, &T) -> Ordering,
+        less: &mut F,
+    ) -> NonNull<Node<T>>
+    where
+        F: FnMut(&T, &T) -> bool,
     {
         let (before_start, before_mid, before_end) =
             (start.as_ref().prev, mid.as_ref().prev, end.as_ref().prev);
-        let (mut first, mut second, mut result) = (*start, mid, before_start);
+        let (mut first, mut second, mut result) = (start, mid, before_start);
         while first != mid && second != end {
-            let this = match compare(&first.as_ref().element, &second.as_ref().element) {
-                std::cmp::Ordering::Greater => &mut second,
-                _ => &mut first,
+            let this = if less(&first.as_ref().element, &second.as_ref().element) {
+                &mut first
+            } else {
+                &mut second
             };
             self.connect(result, *this);
             result = std::mem::replace(this, this.as_ref().next);
@@ -125,7 +139,7 @@ impl<T> List<T> {
             result = rem_back;
         };
         self.connect(result, end);
-        *start = before_start.as_ref().next;
+        before_start.as_ref().next
     }
 }
 
@@ -153,6 +167,21 @@ impl<T> List<T> {
         self.iter().any(|e| e == x)
     }
 
+    /// Sort the list.
+    ///
+    /// This sort is stable (i.e., does not reorder equal elements).
+    ///
+    /// # Complexity
+    ///
+    /// This operation should compute in *O*(*n* * log(*n*)) time and *O*(1) memory.
+    ///
+    /// # Current Implementation
+    ///
+    /// The current algorithm is done by a naive merge sort. There is no extra
+    /// temporary storage during merging.
+    ///
+    /// # Examples
+    ///
     /// ```
     /// use cyclic_list::List;
     /// use std::iter::FromIterator;
@@ -160,35 +189,109 @@ impl<T> List<T> {
     ///
     /// list.sort();
     ///
-    /// assert_eq!(Vec::from_iter(list), Vec::from_iter([1, 2, 3, 4, 5]));
-    /// List::<i32>::new().sort();
+    /// assert_eq!(list.into_vec(), vec![1, 2, 3, 4, 5]);
     /// ```
     pub fn sort(&mut self)
     where
         T: Ord,
     {
-        self.sort_by(T::cmp);
+        self.merge_sort(|a, b| a.lt(&b));
     }
 
-    /// TODO
+    /// Sort the list with a comparator function.
+    ///
+    /// This sort is stable (i.e., does not reorder equal elements).
+    ///
+    /// The comparator function must define a total ordering for the
+    /// elements in the list. If the ordering is not total, the order
+    /// of the elements is unspecified. An order is a total order if
+    /// it is (for all `a`, `b` and `c`):
+    /// - total and antisymmetric: exactly one of `a < b`, `a == b`
+    ///   or `a > b` is true, and
+    /// - transitive, `a < b` and `b < c` implies `a < c`. The same
+    /// must hold for both `==` and `>`.
+    ///
+    /// For example, while [`f64`] doesn’t implement [`Ord`] because
+    /// `NaN != NaN`, we can use `partial_cmp` as our sort function
+    /// when we know the slice doesn’t contain a `NaN`.
+    /// ```
+    /// use cyclic_list::List;
+    /// let mut floats = List::from([5f64, 4.0, 1.0, 3.0, 2.0]);
+    /// floats.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    /// assert_eq!(floats.into_vec(), vec![1.0, 2.0, 3.0, 4.0, 5.0]);
+    /// ```
+    ///
+    /// # Complexity
+    ///
+    /// This operation should compute in *O*(*n* * log(*n*)) time and *O*(1) memory.
+    ///
+    /// # Current Implementation
+    ///
+    /// The current algorithm is done by a naive merge sort. There is no extra
+    /// temporary storage during merging.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cyclic_list::List;
+    /// let mut v = List::from([5, 4, 1, 3, 2]);
+    /// v.sort_by(|a, b| a.cmp(b));
+    /// assert_eq!(v.to_vec(), vec![1, 2, 3, 4, 5]);
+    ///
+    /// // reverse sorting
+    /// v.sort_by(|a, b| b.cmp(a));
+    /// assert_eq!(v.to_vec(), vec![5, 4, 3, 2, 1]);
+    /// ```
     pub fn sort_by<F>(&mut self, mut compare: F)
     where
         F: FnMut(&T, &T) -> Ordering,
     {
-        if self.is_empty() || self.front_node() == self.back_node() {
-            return;
-        }
-        unsafe {
-            self.sort_range(self.front_node(), self.ghost_node(), &mut compare);
-        }
+        self.merge_sort(|a, b| compare(a, b) == Ordering::Less)
     }
 
-    /// TODO
+    /// Sorts the list with a key extraction function.
+    ///
+    /// This sort is stable (i.e., does not reorder equal elements)
+    /// and *O*(*m* \* *n* \* log(*n*)) worst-case, where the
+    /// key function is *O*(*m*).
+    ///
+    /// For expensive key functions (e.g. functions that are not simple
+    /// property accesses or basic operations),
+    /// [`sort_by_cached_key`](List::sort_by_cached_key) is likely to be
+    /// significantly faster, as it does not recompute element keys.
+    ///
+    /// # Complexity
+    ///
+    /// This operation should compute in *O*(*n* * log(*n*)) time and *O*(1) memory.
+    ///
+    /// # Current Implementation
+    ///
+    /// The current algorithm is done by a naive merge sort. There is no extra
+    /// temporary storage during merging.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cyclic_list::List;
+    /// let mut v = List::from([-5i32, 4, 1, -3, 2]);
+    ///
+    /// v.sort_by_key(|k| k.abs());
+    /// assert_eq!(v.into_vec(), vec![1, 2, -3, 4, -5]);
+    /// ```
     pub fn sort_by_key<K, F>(&mut self, mut f: F)
     where
         F: FnMut(&T) -> K,
         K: Ord,
     {
-        self.sort_by(|lhs, rhs| f(lhs).cmp(&f(rhs)));
+        self.merge_sort(|a, b| f(a).lt(&f(b)));
+    }
+
+    /// TODO
+    pub fn sort_by_cached_key<K, F>(&mut self, _f: F)
+    where
+        F: FnMut(&T) -> K,
+        K: Ord,
+    {
+        unimplemented!()
     }
 }

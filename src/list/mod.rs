@@ -5,6 +5,7 @@ use std::ptr::NonNull;
 
 use crate::list::cursor::{Cursor, CursorMut};
 use crate::{IntoIter, Iter, IterMut};
+use std::iter::FromIterator;
 
 pub mod cursor;
 pub mod iterator;
@@ -12,6 +13,7 @@ pub mod iterator;
 mod algorithms;
 
 /// The `List` is a doubly-linked list with owned nodes, implemented as a cyclic list.
+///
 /// It allows inserting, removing elements at any given position in constant time.
 /// In compromise, accessing or mutating elements at any position take *O*(*n*) time.
 ///
@@ -941,6 +943,38 @@ impl<T> List<T> {
             .expect("Cannot splice at a nonexistent node");
         cursor_mut.splice(other);
     }
+
+    /// Converts `self` into a vector without clones.
+    ///
+    /// # Examples
+    /// ```
+    /// use cyclic_list::List;
+    /// let s = List::from([10, 40, 30]);
+    /// let x = s.into_vec();
+    /// // `s` cannot be used anymore because it has been converted into `x`.
+    ///
+    /// assert_eq!(x, vec![10, 40, 30]);
+    /// ```
+    pub fn into_vec(self) -> Vec<T> {
+        Vec::from_iter(self)
+    }
+
+    /// Copies `self` into a new `Vec`.
+    ///
+    /// # Examples
+    /// ```
+    /// use cyclic_list::List;
+    ///
+    /// let s = List::from([10, 40, 30]);
+    /// let x = s.to_vec();
+    /// // Here, `s` and `x` can be modified independently.
+    /// ```
+    pub fn to_vec(&self) -> Vec<T>
+    where
+        T: Clone,
+    {
+        Vec::from_iter(self.iter().cloned())
+    }
 }
 
 impl<T: Debug> Debug for List<T> {
@@ -1017,6 +1051,12 @@ fn assert_adjacent<T>(prev: NonNull<Node<T>>, next: NonNull<Node<T>>) {
 impl<T> Drop for List<T> {
     fn drop(&mut self) {
         self.clear();
+    }
+}
+
+impl<T, const N: usize> From<[T; N]> for List<T> {
+    fn from(array: [T; N]) -> Self {
+        Self::from_iter(array)
     }
 }
 
