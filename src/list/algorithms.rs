@@ -56,35 +56,51 @@ impl<T: Hash> Hash for List<T> {
 }
 
 impl<T> List<T> {
+    const INSERTION_SORT_THRESHOLD: usize = 8;
+
     unsafe fn mid_of_range(
         &self,
         mut start: NonNull<Node<T>>,
         end: NonNull<Node<T>>,
-    ) -> NonNull<Node<T>> {
+    ) -> (NonNull<Node<T>>, usize) {
         let mut mid = start;
+        let mut len = 0;
         while start != end {
+            len += 1;
             start = start.as_ref().next;
             if start != end {
+                len += 1;
                 start = start.as_ref().next;
                 mid = mid.as_ref().next;
             }
         }
-        mid
+        (mid, len)
     }
 
     fn merge_sort<F>(&mut self, mut less: F)
     where
         F: FnMut(&T, &T) -> bool,
     {
-        if self.is_empty() || self.front_node() == self.back_node() {
-            return;
+        let (start, end) = (self.front_node(), self.ghost_node());
+        #[cfg(feature = "length")]
+        if self.len() < 2 {
+        } else if self.len() <= Self::INSERTION_SORT_THRESHOLD {
+            unsafe { self.insertion_sort_range(start, end, &mut less) };
+        } else {
+            unsafe { self.merge_sort_range(start, end, &mut less) };
         }
-        unsafe {
-            self.sort_range(self.front_node(), self.ghost_node(), &mut less);
+
+        #[cfg(not(feature = "length"))]
+        {
+            if self.is_empty() || start == self.back_node() {
+                return;
+            } else {
+                unsafe { self.merge_sort_range(start, end, &mut less) };
+            }
         }
     }
 
-    unsafe fn sort_range<F>(
+    unsafe fn merge_sort_range<F>(
         &mut self,
         mut start: NonNull<Node<T>>,
         end: NonNull<Node<T>>,
@@ -93,13 +109,16 @@ impl<T> List<T> {
     where
         F: FnMut(&T, &T) -> bool,
     {
-        let mut mid = self.mid_of_range(start, end);
+        let (mut mid, len) = self.mid_of_range(start, end);
+        if len <= Self::INSERTION_SORT_THRESHOLD {
+            return self.insertion_sort_range(start, end, less);
+        }
 
         if start != mid && start.as_ref().next != mid {
-            start = self.sort_range(start, mid, less);
+            start = self.merge_sort_range(start, mid, less);
         }
         if mid != end && mid.as_ref().next != end {
-            mid = self.sort_range(mid, end, less);
+            mid = self.merge_sort_range(mid, end, less);
         }
 
         if start != mid && mid != end {
@@ -110,7 +129,7 @@ impl<T> List<T> {
 
     unsafe fn merge_range<F>(
         &mut self,
-        start: NonNull<Node<T>>,
+        mut start: NonNull<Node<T>>,
         mid: NonNull<Node<T>>,
         end: NonNull<Node<T>>,
         less: &mut F,
@@ -118,28 +137,61 @@ impl<T> List<T> {
     where
         F: FnMut(&T, &T) -> bool,
     {
-        let (before_start, before_mid, before_end) =
-            (start.as_ref().prev, mid.as_ref().prev, end.as_ref().prev);
-        let (mut first, mut second, mut result) = (start, mid, before_start);
-        while first != mid && second != end {
-            let this = if less(&first.as_ref().element, &second.as_ref().element) {
-                &mut first
-            } else {
-                &mut second
-            };
-            self.connect(result, *this);
-            result = std::mem::replace(this, this.as_ref().next);
+        let (mut merged, merged_back, mut to_merge) = (start, mid.as_ref().prev, mid);
+        while to_merge != end && less(&to_merge.as_ref().element, &merged_back.as_ref().element) {
+            while merged != to_merge && !less(&to_merge.as_ref().element, &merged.as_ref().element)
+            {
+                merged = merged.as_ref().next;
+            }
+            if merged == to_merge {
+                break;
+            }
+
+            let mut next_to_merge = to_merge.as_ref().next;
+            while next_to_merge != end
+                && less(&next_to_merge.as_ref().element, &merged.as_ref().element)
+            {
+                next_to_merge = next_to_merge.as_ref().next;
+            }
+            if merged == start {
+                start = to_merge;
+            }
+            self.move_nodes(to_merge, next_to_merge.as_ref().prev, merged);
+            to_merge = next_to_merge;
         }
-        if let Some((rem_front, rem_back)) = match (first != mid, second != end) {
-            (true, false) => Some((first, before_mid)),
-            (false, true) => Some((second, before_end)),
-            _ => None,
-        } {
-            self.connect(result, rem_front);
-            result = rem_back;
-        };
-        self.connect(result, end);
-        before_start.as_ref().next
+        start
+    }
+
+    unsafe fn insertion_sort_range<F>(
+        &mut self,
+        mut start: NonNull<Node<T>>,
+        end: NonNull<Node<T>>,
+        less: &mut F,
+    ) -> NonNull<Node<T>>
+    where
+        F: FnMut(&T, &T) -> bool,
+    {
+        let (mut sorted_back, mut to_sort) = (start, start.as_ref().next);
+        loop {
+            while to_sort != end && !less(&to_sort.as_ref().element, &sorted_back.as_ref().element)
+            {
+                sorted_back = to_sort;
+                to_sort = to_sort.as_ref().next;
+            }
+            if to_sort == end {
+                break;
+            }
+            let mut sorted = start;
+            while sorted != to_sort && !less(&to_sort.as_ref().element, &sorted.as_ref().element) {
+                sorted = sorted.as_ref().next;
+            }
+            if sorted == start {
+                start = to_sort;
+            }
+            let next = to_sort.as_ref().next;
+            self.move_node(std::mem::replace(&mut to_sort, next), sorted);
+        }
+        start
     }
 }
 
@@ -195,7 +247,7 @@ impl<T> List<T> {
     where
         T: Ord,
     {
-        self.merge_sort(|a, b| a.lt(&b));
+        self.merge_sort(|a, b| a.lt(b));
     }
 
     /// Sort the list with a comparator function.

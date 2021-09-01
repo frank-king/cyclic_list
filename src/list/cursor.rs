@@ -689,7 +689,7 @@ impl<'a, T: 'a> CursorMut<'a, T> {
     /// belong to the current list that the cursor points to.
     unsafe fn insert_before(&mut self, next: NonNull<Node<T>>, item: T) -> NonNull<Node<T>> {
         let node = Node::new_detached(item);
-        self.list.attach_node(next.as_ref().prev, next, node);
+        self.list.attach_node(next, node);
         node
     }
 }
@@ -1208,10 +1208,7 @@ impl<'a, T: 'a> CursorMut<'a, T> {
             }
             // SAFETY: `self.current.prev` and `self.current` are valid nodes in the list,
             // and they are adjacent, so it is safe.
-            unsafe {
-                self.list
-                    .attach_nodes(self.prev_node(), self.current, detached);
-            }
+            unsafe { self.list.attach_nodes(self.current, detached) };
         }
     }
 }

@@ -87,6 +87,21 @@ impl<T> List<T> {
         next.as_mut().prev = prev;
     }
 
+    pub(crate) unsafe fn move_node(&mut self, from: NonNull<Node<T>>, to: NonNull<Node<T>>) {
+        self.move_nodes(from, from, to);
+    }
+
+    pub(crate) unsafe fn move_nodes(
+        &mut self,
+        from_front: NonNull<Node<T>>,
+        from_back: NonNull<Node<T>>,
+        to: NonNull<Node<T>>,
+    ) {
+        self.connect(from_front.as_ref().prev, from_back.as_ref().next);
+        self.connect(to.as_ref().prev, from_front);
+        self.connect(from_back, to);
+    }
+
     /// Detach a single node `node` from the list, and return it as a box.
     ///
     /// It is unsafe because it does not check whether `node` belongs to the list.
@@ -103,32 +118,19 @@ impl<T> List<T> {
         node
     }
 
-    /// Attach a single node `node` to the list, between `prev` and `next`.
+    /// Attach a single node `node` to the list, before `next`.
     ///
-    /// It is unsafe because it does not check whether `prev` and `next` belongs
-    /// to the list, or whether the `prev` and `next` is adjacent (only in
-    /// `#[cfg(debug_assertions)]`).
+    /// It is unsafe because it does not check whether `next` belongs
+    /// to the list.
     ///
-    /// If the `prev` and `next` does not belong to the list, or they are not
-    /// adjacent nodes, this function call will make the list ill-formed.
-    pub(crate) unsafe fn attach_node(
-        &mut self,
-        prev: NonNull<Node<T>>,
-        next: NonNull<Node<T>>,
-        node: NonNull<Node<T>>,
-    ) {
-        #[cfg(debug_assertions)]
-        assert_adjacent(prev, next);
-        self.connect(prev, node);
+    /// If `next` does not belong to the list, this function call
+    /// will make the list ill-formed.
+    pub(crate) unsafe fn attach_node(&mut self, next: NonNull<Node<T>>, node: NonNull<Node<T>>) {
+        self.connect(next.as_ref().prev, node);
         self.connect(node, next);
         #[cfg(feature = "length")]
         {
             self.len += 1;
-        }
-        #[cfg(debug_assertions)]
-        {
-            assert_adjacent(prev, node);
-            assert_adjacent(node, next);
         }
     }
 
@@ -160,32 +162,24 @@ impl<T> List<T> {
         )
     }
 
-    /// Attach a range of detached nodes to the list, between `prev` and `next`.
+    /// Attach a range of detached nodes `detached` to the list,
+    /// before `next`.
     ///
-    /// It is unsafe because it does not check whether `prev` and `next` belongs
-    /// to the list, or whether the `prev` and `next` is adjacent (only in
-    /// `#[cfg(debug_assertions)]`).
+    /// It is unsafe because it does not check whether `next` belongs
+    /// to the list.
     ///
-    /// If the `prev` and `next` does not belong to the list, or they are not
-    /// adjacent nodes, this function call will make the list ill-formed.
+    /// If `next` does not belong to the list, this function call
+    /// will make the list ill-formed.
     pub(crate) unsafe fn attach_nodes(
         &mut self,
-        prev: NonNull<Node<T>>,
         next: NonNull<Node<T>>,
         detached: DetachedNodes<T>,
     ) {
-        #[cfg(debug_assertions)]
-        assert_adjacent(prev, next);
-        self.connect(prev, detached.front);
+        self.connect(next.as_ref().prev, detached.front);
         self.connect(detached.back, next);
         #[cfg(feature = "length")]
         {
             self.len += detached.len;
-        }
-        #[cfg(debug_assertions)]
-        {
-            assert_adjacent(prev, detached.front);
-            assert_adjacent(detached.back, next);
         }
     }
 
@@ -214,7 +208,7 @@ impl<T> List<T> {
     pub(crate) fn from_detached(detached: DetachedNodes<T>) -> Self {
         let mut list = List::new();
         unsafe {
-            list.attach_nodes(list.ghost_node(), list.ghost_node(), detached);
+            list.attach_nodes(list.ghost_node(), detached);
         }
         list
     }
@@ -761,7 +755,7 @@ impl<T> List<T> {
         if let Some(detached) = other.detach_all_nodes() {
             // `self.back_node()` and `self.ghost_node()` are valid
             // nodes in the list and they are adjacent, so it is safe.
-            unsafe { self.attach_nodes(self.back_node(), self.ghost_node(), detached) }
+            unsafe { self.attach_nodes(self.ghost_node(), detached) }
         }
     }
 
@@ -799,7 +793,7 @@ impl<T> List<T> {
         if let Some(detached) = other.detach_all_nodes() {
             // `self.ghost_node()` and `self.front_node()` are valid
             // nodes in the list and they are adjacent, so it is safe.
-            unsafe { self.attach_nodes(self.ghost_node(), self.front_node(), detached) }
+            unsafe { self.attach_nodes(self.front_node(), detached) }
         }
     }
 
@@ -973,7 +967,7 @@ impl<T> List<T> {
     where
         T: Clone,
     {
-        Vec::from_iter(self.iter().cloned())
+        self.iter().cloned().collect()
     }
 }
 
@@ -1038,14 +1032,6 @@ fn new_ghost() -> Box<Node<Erased>> {
     ghost.next = ghost_ptr;
     ghost.prev = ghost_ptr;
     ghost
-}
-
-#[cfg(debug_assertions)]
-fn assert_adjacent<T>(prev: NonNull<Node<T>>, next: NonNull<Node<T>>) {
-    unsafe {
-        assert_eq!(prev.as_ref().next, next);
-        assert_eq!(next.as_ref().prev, prev);
-    }
 }
 
 impl<T> Drop for List<T> {
