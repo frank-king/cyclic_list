@@ -78,30 +78,6 @@ impl<T> List<T> {
         NonNull::from(unsafe { self.ghost_node().as_ref().prev.as_ref() }).cast()
     }
 
-    pub(crate) unsafe fn connect(
-        &mut self,
-        mut prev: NonNull<Node<T>>,
-        mut next: NonNull<Node<T>>,
-    ) {
-        prev.as_mut().next = next;
-        next.as_mut().prev = prev;
-    }
-
-    pub(crate) unsafe fn move_node(&mut self, from: NonNull<Node<T>>, to: NonNull<Node<T>>) {
-        self.move_nodes(from, from, to);
-    }
-
-    pub(crate) unsafe fn move_nodes(
-        &mut self,
-        from_front: NonNull<Node<T>>,
-        from_back: NonNull<Node<T>>,
-        to: NonNull<Node<T>>,
-    ) {
-        self.connect(from_front.as_ref().prev, from_back.as_ref().next);
-        self.connect(to.as_ref().prev, from_front);
-        self.connect(from_back, to);
-    }
-
     /// Detach a single node `node` from the list, and return it as a box.
     ///
     /// It is unsafe because it does not check whether `node` belongs to the list.
@@ -114,7 +90,7 @@ impl<T> List<T> {
             self.len -= 1;
         }
         let node = Box::from_raw(node.as_ptr());
-        self.connect(node.prev, node.next);
+        connect(node.prev, node.next);
         node
     }
 
@@ -126,8 +102,8 @@ impl<T> List<T> {
     /// If `next` does not belong to the list, this function call
     /// will make the list ill-formed.
     pub(crate) unsafe fn attach_node(&mut self, next: NonNull<Node<T>>, node: NonNull<Node<T>>) {
-        self.connect(next.as_ref().prev, node);
-        self.connect(node, next);
+        connect(next.as_ref().prev, node);
+        connect(node, next);
         #[cfg(feature = "length")]
         {
             self.len += 1;
@@ -153,7 +129,7 @@ impl<T> List<T> {
         {
             self.len -= len;
         }
-        self.connect(front.as_ref().prev, back.as_ref().next);
+        connect(front.as_ref().prev, back.as_ref().next);
         DetachedNodes::new(
             front,
             back,
@@ -175,8 +151,8 @@ impl<T> List<T> {
         next: NonNull<Node<T>>,
         detached: DetachedNodes<T>,
     ) {
-        self.connect(next.as_ref().prev, detached.front);
-        self.connect(detached.back, next);
+        connect(next.as_ref().prev, detached.front);
+        connect(detached.back, next);
         #[cfg(feature = "length")]
         {
             self.len += detached.len;
@@ -1032,6 +1008,11 @@ fn new_ghost() -> Box<Node<Erased>> {
     ghost.next = ghost_ptr;
     ghost.prev = ghost_ptr;
     ghost
+}
+
+pub(crate) unsafe fn connect<T>(mut prev: NonNull<Node<T>>, mut next: NonNull<Node<T>>) {
+    prev.as_mut().next = next;
+    next.as_mut().prev = prev;
 }
 
 impl<T> Drop for List<T> {
